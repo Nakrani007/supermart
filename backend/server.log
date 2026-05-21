@@ -1,0 +1,19 @@
+[32minfo[39m: Database connected {"timestamp":"2026-05-20T11:00:05.740Z"}
+[33mwarn[39m: Redis unavailable — cache disabled {"timestamp":"2026-05-20T11:00:05.763Z"}
+[32minfo[39m: [object Object] {"timestamp":"2026-05-20T11:00:05.765Z"}
+
+📧 [DEV EMAIL] To: raju@test.com
+Subject: SuperMart — Password Reset OTP
+Your OTP to reset your SuperMart password is: 375174
+
+This OTP expires in 10 minutes.
+
+If you did not request this, please ignore this email.
+
+[32minfo[39m: [object Object] {"timestamp":"2026-05-20T11:00:09.192Z"}
+
+📱 [DEV OTP] Mobile: 9624758539  Code: 761561
+
+[32minfo[39m: [object Object] {"timestamp":"2026-05-20T11:02:38.296Z"}
+[32minfo[39m: [object Object] {"timestamp":"2026-05-20T11:02:38.296Z"}
+[32minfo[39m: [object Object] {"timestamp":"2026-05-20T13:31:08.281Z"}

@@ -1,0 +1,26 @@
+You are an expert Principal Full-Stack Engineer and UI/UX Architect specializing in high-throughput Indian e-commerce systems. Build a production-ready, highly scalable architecture blueprint and multi-file code implementation for a "Local Super Mart Hybrid Online Platform" optimized specifically for Tier-2 market behaviors (high volume, fast inventory turnover, regional localization).
+
+### 1. UX/UI & FRONTEND SPECS (React 19 + Vite + Tailwind CSS)
+- **Design Philosophy:** Mobile-first, hyper-clean layout mimicking high-speed quick-commerce but structurally adapted for bulk shopping carts. Completely avoid hidden nested menus.
+- **Key Features to Implement:**
+  1. **Omnipresent Search & Voice UI Component:** Native web-speech API listener integrated cleanly into a top search bar that can effortlessly capture English, Hindi, and Gujarati phonetic keywords.
+  2. **Dual-Mode Checkout Selector:** Toggle component prominently displayed at cart level: "Home Delivery (with slotted timings)" vs. "Store Pickup / Click-and-Collect (Zero Delivery Fee)".
+  3. **"Bachat" (Savings) Tracker Interface:** Dynamic UI chip in the cart sidebar that updates in real-time as items are added, calculating the delta between MSRP and the Mart's Everyday Low Price (EDLP).
+  4. **The "Hisaab" Dashboard for Vernacular Users:** An elegant, highly visual profile interface using regional localized terminologies ('Total Aaj ni Kamani' or 'Aapni Bachat') instead of rigid western corporate metrics.
+  5. **WhatsApp List Image Uploader Component:** Drag-and-drop zone allowing users to upload an image of a handwritten grocery list, bypassing standard catalog navigation.
+
+### 2. BACKEND & DATA ARCHITECTURE (Node.js + Express + Prisma ORM + PostgreSQL)
+- **Database Schema (Prisma Format):**
+  - Define robust, relational models for: `User`, `Product` (must include `barcode` string index, `sku`, `stockQty`, `discountPrice`, `mrp`), `Order`, `OrderLineItem`, and `DeliverySlot`.
+- **Core API Endpoints to Write:**
+  - `POST /api/v1/orders/create` - Handles cart validation, checks live database stock levels before locking inventory, applies calculations, and generates structural order tickets.
+  - `POST /api/v1/pos/sync` - High-speed ingestion endpoint mimicking a webhook interface to receive barcode stock updates from physical retail billing software, executing bulk upserts seamlessly.
+  - `POST /api/v1/orders/upload-list` - Handles handwritten image processing triggers and queues them for staff terminal picking apps.
+
+### 3. EXTENSIVE CODE IMPLEMENTATION
+Generate clean, highly modular, fully commented, production-grade files for:
+- `schema.prisma` (The relational structural framework)
+- `server.js` & `orderController.js` (Express backend routing, API protection, transactional stock updates)
+- `CartPage.jsx` & `VoiceSearch.jsx` (React frontend modules using Tailwind CSS utility styles layout)
+
+Write defensive code handling race conditions (two users buying the last stock simultaneously), enforce strict structural types, and ensure the components are visually scannable. Do not use generic placeholders.
