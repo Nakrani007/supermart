@@ -62,7 +62,23 @@ function ImagePicker({ value, onChange }) {
   const [dragOver, setDragOver]   = useState(false);
   const [uploadErr, setUploadErr] = useState('');
   const [lightbox, setLightbox]   = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const previewUrlRef = useRef('');
   const fileRef = useRef(null);
+
+  // Revoke blob URL when the image is removed externally
+  useEffect(() => {
+    if (!value && previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = '';
+      setPreviewUrl('');
+    }
+  }, [value]);
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); };
+  }, []);
 
   // ── URL tab ────────────────────────────────────────────────────────────────
   const UrlTab = () => (
@@ -131,20 +147,19 @@ function ImagePicker({ value, onChange }) {
     const prompt = aiPrompt.trim();
     if (!prompt) return;
     setGenerating(true);
-    // Build the URL — Pollinations generates real AI images via diffusion
     const encoded = encodeURIComponent(`${prompt}, product photography, white background, high quality, professional`);
     const url = `https://image.pollinations.ai/prompt/${encoded}?width=512&height=512&nologo=true&seed=${Date.now()}`;
-    // Pre-load to confirm the image is ready before setting
     try {
-      await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = url;
-      });
+      // Fetch the image bytes directly so the blob URL displays without a second network round-trip
+      const res = await fetch(url);
+      const blob = await res.blob();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      const blobUrl = URL.createObjectURL(blob);
+      previewUrlRef.current = blobUrl;
+      setPreviewUrl(blobUrl);
       onChange(url);
     } catch {
-      // Pollinations can time out — just set the URL directly, it may still work
+      // CORS or network failure — fall back to direct URL (may still load)
       onChange(url);
     } finally {
       setGenerating(false);
@@ -211,7 +226,7 @@ function ImagePicker({ value, onChange }) {
             <button type="button" onClick={() => setLightbox(true)}
               className="w-16 h-16 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700
                          hover:border-brand-500 transition-colors group relative">
-              <img src={value} alt="preview" className="w-full h-full object-contain p-1"
+              <img src={previewUrl || value} alt="preview" className="w-full h-full object-contain p-1"
                 onError={(e) => { e.target.style.display = 'none'; }} />
               {/* hover overlay */}
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity
