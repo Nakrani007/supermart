@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { productsApi } from '../api/products.api.js';
-import Header from '../components/layout/Header.jsx';
-import Footer from '../components/layout/Footer.jsx';
+import { productsApi }          from '../api/products.api.js';
+import { useStoreSelectionStore } from '../store/storeSelectionStore.js';
+import Header     from '../components/layout/Header.jsx';
+import Footer     from '../components/layout/Footer.jsx';
 import ProductCard from '../components/common/ProductCard.jsx';
 
 const SORT_OPTIONS = [
@@ -36,6 +37,7 @@ function ProductSkeleton() {
 export default function ProductListingPage() {
   const navigate          = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { selectedStore } = useStoreSelectionStore();
 
   const categoryParam = searchParams.get('category') || '';
   const sortParam     = searchParams.get('sort') || '';
@@ -68,11 +70,14 @@ export default function ProductListingPage() {
     try {
       const q = {
         page: pageNum, limit: 20,
-        ...(params.category && { category: params.category }),
-        ...(params.sort     && { sort: params.sort }),
-        ...(params.minPrice && { minPrice: params.minPrice }),
-        ...(params.maxPrice && { maxPrice: params.maxPrice }),
-        ...(params.search   && { search: params.search }),
+        ...(params.category  && { category:  params.category  }),
+        ...(params.sort      && { sort:      params.sort      }),
+        ...(params.minPrice  && { minPrice:  params.minPrice  }),
+        ...(params.maxPrice  && { maxPrice:  params.maxPrice  }),
+        ...(params.search    && { search:    params.search    }),
+        // Pass storeId so the backend returns only products available at this
+        // store. Falls back to global catalog if store has no inventory set up.
+        ...(selectedStore    && { storeId:   selectedStore.id }),
       };
       const r = await productsApi.getAll(q);
       setProducts((prev) => pageNum === 1 ? (r.products || []) : [...prev, ...(r.products || [])]);
@@ -80,9 +85,9 @@ export default function ProductListingPage() {
       setHasMore(pageNum < (r.totalPages || 1));
     } catch {}
     finally { setLoading(false); }
-  }, []);
+  }, [selectedStore?.id]); // eslint-disable-line
 
-  // Re-fetch on URL param change
+  // Re-fetch on URL param change OR when selected store changes
   useEffect(() => {
     setPage(1);
     setProducts([]);
@@ -93,7 +98,7 @@ export default function ProductListingPage() {
       maxPrice: maxPriceParam,
       search: searchParams.get('search'),
     });
-  }, [categoryParam, sortParam, minPriceParam, maxPriceParam, searchParams.get('search')]); // eslint-disable-line
+  }, [categoryParam, sortParam, minPriceParam, maxPriceParam, searchParams.get('search'), selectedStore?.id]); // eslint-disable-line
 
   // Infinite scroll
   useEffect(() => {
@@ -126,9 +131,7 @@ export default function ProductListingPage() {
 
   const clearFilters = () => {
     setDraftSort(''); setDraftCat(''); setDraftMin(''); setDraftMax(''); setPriceRangeIdx(-1);
-    const p = {};
-    if (searchParams.get('search')) p.search = searchParams.get('search');
-    setSearchParams(p);
+    setSearchParams({});
     setShowFilter(false);
   };
 

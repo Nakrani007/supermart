@@ -1,6 +1,7 @@
 // Admin Categories Page — CRUD, visibility toggle, icon/image, sort order, AI content generation.
 
 import { useState, useEffect } from 'react';
+import Tooltip from '../components/common/Tooltip.jsx';
 import AdminLayout from './AdminLayout.jsx';
 import { adminApi } from '../api/admin.api.js';
 
@@ -389,20 +390,24 @@ export default function AdminCategoriesPage() {
 
                   {/* Reorder */}
                   <div className="flex flex-col gap-0.5 flex-shrink-0">
-                    <button onClick={() => move(idx, -1)} disabled={idx === 0}
-                      className="w-5 h-4 flex items-center justify-center text-gray-600
-                                 hover:text-gray-300 disabled:opacity-20 transition-colors">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
-                      </svg>
-                    </button>
-                    <button onClick={() => move(idx, 1)} disabled={idx === categories.length - 1}
-                      className="w-5 h-4 flex items-center justify-center text-gray-600
-                                 hover:text-gray-300 disabled:opacity-20 transition-colors">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
+                    <Tooltip text="Move up in display order" position="right">
+                      <button onClick={() => move(idx, -1)} disabled={idx === 0}
+                        className="w-5 h-4 flex items-center justify-center text-gray-600
+                                   hover:text-gray-300 disabled:opacity-20 transition-colors">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                        </svg>
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Move down in display order" position="right">
+                      <button onClick={() => move(idx, 1)} disabled={idx === categories.length - 1}
+                        className="w-5 h-4 flex items-center justify-center text-gray-600
+                                   hover:text-gray-300 disabled:opacity-20 transition-colors">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                    </Tooltip>
                   </div>
 
                   {/* Icon/image */}
@@ -418,15 +423,19 @@ export default function AdminCategoriesPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold text-white truncate">{cat.name}</p>
                       {!cat.isVisible && (
-                        <span className="text-[10px] bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0">
-                          Hidden
-                        </span>
+                        <Tooltip text="Hidden from customers — click 👁️ to show" position="top">
+                          <span className="text-[10px] bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0 cursor-help">
+                            Hidden
+                          </span>
+                        </Tooltip>
                       )}
                       {cat.description && (
-                        <span className="text-[10px] bg-purple-950/50 text-purple-400 border border-purple-800/40
-                                         px-1.5 py-0.5 rounded flex-shrink-0">
-                          SEO ✓
-                        </span>
+                        <Tooltip text="Has SEO description — helps search engines index this category" position="top">
+                          <span className="text-[10px] bg-purple-950/50 text-purple-400 border border-purple-800/40
+                                           px-1.5 py-0.5 rounded flex-shrink-0 cursor-help">
+                            SEO ✓
+                          </span>
+                        </Tooltip>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 truncate">
@@ -435,25 +444,30 @@ export default function AdminCategoriesPage() {
                   </div>
 
                   {/* Visibility toggle */}
-                  <button onClick={() => handleToggleVisible(cat)}
-                    title={cat.isVisible ? 'Click to hide' : 'Click to show'}
-                    className={`text-lg transition-colors flex-shrink-0
-                      ${cat.isVisible ? 'text-green-400 hover:text-green-300' : 'text-gray-600 hover:text-gray-400'}`}>
-                    {cat.isVisible ? '👁️' : '🙈'}
-                  </button>
+                  <Tooltip text={cat.isVisible ? 'Visible to customers — click to hide' : 'Hidden from customers — click to show'} position="top">
+                    <button onClick={() => handleToggleVisible(cat)}
+                      className={`text-lg transition-colors flex-shrink-0
+                        ${cat.isVisible ? 'text-green-400 hover:text-green-300' : 'text-gray-600 hover:text-gray-400'}`}>
+                      {cat.isVisible ? '👁️' : '🙈'}
+                    </button>
+                  </Tooltip>
 
                   {/* Actions */}
                   <div className="flex gap-1 flex-shrink-0">
-                    <button onClick={() => setModal(cat)}
-                      className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200
-                                 text-xs font-semibold rounded-lg transition-colors">
-                      Edit
-                    </button>
-                    <button onClick={() => setDelConfirm(cat)}
-                      className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400
-                                 text-xs font-semibold rounded-lg transition-colors">
-                      Del
-                    </button>
+                    <Tooltip text="Edit category name, icon, slug & SEO" position="top">
+                      <button onClick={() => setModal(cat)}
+                        className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200
+                                   text-xs font-semibold rounded-lg transition-colors">
+                        Edit
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Delete this category" position="top">
+                      <button onClick={() => setDelConfirm(cat)}
+                        className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400
+                                   text-xs font-semibold rounded-lg transition-colors">
+                        Del
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
               ))}

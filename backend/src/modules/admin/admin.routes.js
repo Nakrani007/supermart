@@ -44,14 +44,32 @@ adminRouter.post  ('/slots',     ctrl.createSlot);
 adminRouter.patch ('/slots/:id', ctrl.updateSlot);
 adminRouter.delete('/slots/:id', ctrl.deleteSlot);
 
+// Stores
+adminRouter.get   ('/stores',          ctrl.getStores);
+adminRouter.post  ('/stores',          ctrl.createStore);
+adminRouter.put   ('/stores/:id',      ctrl.updateStore);
+adminRouter.delete('/stores/:id',      ctrl.deleteStore);
+adminRouter.patch ('/stores/:id/main', ctrl.setMainStore);
+
 // Delivery Config
 adminRouter.get  ('/delivery-config', ctrl.getDeliveryConfig);
 adminRouter.patch('/delivery-config', ctrl.updateDeliveryConfig);
+
+// Delivery Zone (radius + pincode whitelist)
+adminRouter.get  ('/delivery-zone', ctrl.getDeliveryZone);
+adminRouter.patch('/delivery-zone', ctrl.updateDeliveryZone);
 
 // Users
 adminRouter.get  ('/users',                 ctrl.getUsers);
 adminRouter.patch('/users/:id/toggle',      ctrl.toggleUser);
 adminRouter.get  ('/users/:id/orders',      ctrl.getUserOrders);
 
+// Store Inventory (per-store product stock management)
+adminRouter.get('/inventory',            ctrl.getStoreInventory);   // ?storeId=X
+adminRouter.put('/inventory/:productId', ctrl.upsertStoreProduct);  // { storeId, stockQty, isActive }
+
 // Image Upload
 adminRouter.post('/upload/image', upload.single('image'), ctrl.uploadImage);
+
+// AI Image Proxy — fetch Pollinations server-side to avoid browser CORS
+adminRouter.get('/proxy-image', ctrl.proxyImage);

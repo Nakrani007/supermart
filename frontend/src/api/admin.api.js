@@ -6,7 +6,7 @@ export const adminApi = {
   login: (c) => adminClient.post('/admin/auth/login', c),
 
   // ── Analytics ───────────────────────────────────────────────────────────────
-  getMetrics: () => adminClient.get('/admin/metrics'),
+  getMetrics: (params) => adminClient.get('/admin/metrics', { params }),
 
   // ── Products ────────────────────────────────────────────────────────────────
   getProducts:    (p) => adminClient.get('/admin/products', { params: p }),
@@ -18,6 +18,7 @@ export const adminApi = {
     fd.append('image', file);
     return adminClient.post('/admin/upload/image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
   },
+  proxyImage: (url) => adminClient.get('/admin/proxy-image', { params: { url }, responseType: 'blob' }),
 
   // ── Categories ──────────────────────────────────────────────────────────────
   getCategories:       ()       => adminClient.get('/admin/categories'),
@@ -47,14 +48,30 @@ export const adminApi = {
   getDeliveryConfig:    ()  => adminClient.get('/admin/delivery-config'),
   updateDeliveryConfig: (d) => adminClient.patch('/admin/delivery-config', d),
 
+  // ── Stores ──────────────────────────────────────────────────────────────────
+  getStores:    ()      => adminClient.get('/admin/stores'),
+  createStore:  (d)     => adminClient.post('/admin/stores', d),
+  updateStore:  (id, d) => adminClient.put(`/admin/stores/${id}`, d),
+  deleteStore:  (id)    => adminClient.delete(`/admin/stores/${id}`),
+  setMainStore: (id)    => adminClient.patch(`/admin/stores/${id}/main`),
+
+  // ── Store Inventory ──────────────────────────────────────────────────────────
+  getStoreInventory:   (p)              => adminClient.get('/admin/inventory', { params: p }),
+  upsertStoreProduct:  (productId, d)   => adminClient.put(`/admin/inventory/${productId}`, d),
+
+  // ── Delivery Zone ────────────────────────────────────────────────────────────
+  getDeliveryZone:    ()  => adminClient.get('/admin/delivery-zone'),
+  updateDeliveryZone: (d) => adminClient.patch('/admin/delivery-zone', d),
+
   // ── Users ────────────────────────────────────────────────────────────────────
   getUsers:      (p)   => adminClient.get('/admin/users', { params: p }),
   toggleUser:    (id)  => adminClient.patch(`/admin/users/${id}/toggle`),
   getUserOrders: (id, p) => adminClient.get(`/admin/users/${id}/orders`, { params: p }),
 
   // ── Orders (dashboard routes with admin token) ───────────────────────────────
-  getOrders:         (p)       => adminClient.get('/dashboard/orders', { params: p }),
-  updateOrderStatus: (id, s)   => adminClient.patch(`/dashboard/orders/${id}/status`, { status: s }),
+  getOrders:              (p)        => adminClient.get('/dashboard/orders', { params: p }),
+  updateOrderStatus:      (id, s)    => adminClient.patch(`/dashboard/orders/${id}/status`, { status: s }),
+  updateDeliveryTracking: (id, lat, lng) => adminClient.put(`/dashboard/orders/${id}/tracking`, { lat, lng }),
 };
 
 // Public APIs read by customer frontend
@@ -62,5 +79,7 @@ export const publicApi = {
   getBanners:        () => client.get('/products/banners'),
   getSections:       () => client.get('/products/sections'),
   getDeliveryConfig: () => client.get('/products/delivery-config'),
+  getDeliveryZone:   () => client.get('/products/delivery-zone'),
+  getStores:         () => client.get('/products/stores'),
   getLabeledProducts:(label, limit) => client.get('/products/labeled', { params: { label, limit } }),
 };

@@ -11,6 +11,12 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
+      // Proxy Pollinations image requests — avoids CORS/Referer blocking in <img> tags
+      '/pollinations-img': {
+        target: 'https://image.pollinations.ai',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/pollinations-img/, ''),
+      },
     },
   },
   build: {

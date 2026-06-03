@@ -1,8 +1,10 @@
 // Admin Products Page — full CRUD for product catalog with label management.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import AdminLayout from './AdminLayout.jsx';
-import { adminApi } from '../api/admin.api.js';
+import AdminLayout            from './AdminLayout.jsx';
+import { adminApi }           from '../api/admin.api.js';
+import { useAdminStoreStore } from '../store/adminStoreStore.js';
+import Tooltip                from '../components/common/Tooltip.jsx';
 
 // ─── Image Picker (3 modes: URL / Upload / AI Generate) ──────────────────────
 
@@ -12,7 +14,9 @@ const IMG_TABS = [
   { key: 'ai',     icon: '✨', label: 'AI Generate' },
 ];
 
-function ImageLightbox({ src, onClose }) {
+// src  = blob URL when available (for <img> display)
+// href = always the original remote URL (for "Open in Tab" link + footer)
+function ImageLightbox({ src, href, onClose }) {
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/90 backdrop-blur-sm" />
@@ -22,7 +26,7 @@ function ImageLightbox({ src, onClose }) {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
             <p className="text-sm font-semibold text-white">Image Preview</p>
             <div className="flex items-center gap-2">
-              <a href={src} target="_blank" rel="noreferrer"
+              <a href={href} target="_blank" rel="noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition-colors">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -44,15 +48,22 @@ function ImageLightbox({ src, onClose }) {
               className="max-w-full max-h-[65vh] object-contain rounded-lg"
               onError={(e) => { e.target.src = ''; e.target.alt = 'Image failed to load'; }} />
           </div>
-          {/* URL footer */}
+          {/* URL footer — always shows the real remote URL */}
           <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-950">
-            <p className="text-[11px] text-gray-500 truncate font-mono">{src}</p>
+            <p className="text-[11px] text-gray-500 truncate font-mono">{href}</p>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+// Convert a Pollinations URL to go through the Vite dev proxy — fixes CORS/Referer blocking.
+// The original URL is always kept in form state (saved to DB); this is display-only.
+const toImgSrc = (url) => {
+  if (!url || !url.includes('image.pollinations.ai')) return url;
+  return url.replace('https://image.pollinations.ai', '/pollinations-img');
+};
 
 function ImagePicker({ value, onChange }) {
   const [tab, setTab]         = useState('url');
@@ -62,23 +73,7 @@ function ImagePicker({ value, onChange }) {
   const [dragOver, setDragOver]   = useState(false);
   const [uploadErr, setUploadErr] = useState('');
   const [lightbox, setLightbox]   = useState(false);
-  const [previewUrl, setPreviewUrl] = useState('');
-  const previewUrlRef = useRef('');
   const fileRef = useRef(null);
-
-  // Revoke blob URL when the image is removed externally
-  useEffect(() => {
-    if (!value && previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = '';
-      setPreviewUrl('');
-    }
-  }, [value]);
-
-  // Cleanup blob URL on unmount
-  useEffect(() => {
-    return () => { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); };
-  }, []);
 
   // ── URL tab ────────────────────────────────────────────────────────────────
   const UrlTab = () => (
@@ -150,18 +145,16 @@ function ImagePicker({ value, onChange }) {
     const encoded = encodeURIComponent(`${prompt}, product photography, white background, high quality, professional`);
     const url = `https://image.pollinations.ai/prompt/${encoded}?width=512&height=512&nologo=true&seed=${Date.now()}`;
     try {
-      // Fetch the image bytes directly so the blob URL displays without a second network round-trip
-      const res = await fetch(url);
-      const blob = await res.blob();
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-      const blobUrl = URL.createObjectURL(blob);
-      previewUrlRef.current = blobUrl;
-      setPreviewUrl(blobUrl);
+      // Preload via Vite proxy — waits for generation, caches response for the <img> render
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload  = resolve;
+        img.onerror = reject;
+        img.src = toImgSrc(url);
+      });
+    } catch { /* generation failed — still set the URL so the user can see the error */ }
+    finally {
       onChange(url);
-    } catch {
-      // CORS or network failure — fall back to direct URL (may still load)
-      onChange(url);
-    } finally {
       setGenerating(false);
     }
   };
@@ -226,7 +219,8 @@ function ImagePicker({ value, onChange }) {
             <button type="button" onClick={() => setLightbox(true)}
               className="w-16 h-16 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700
                          hover:border-brand-500 transition-colors group relative">
-              <img src={previewUrl || value} alt="preview" className="w-full h-full object-contain p-1"
+              <img src={toImgSrc(value)} alt="preview"
+                className="w-full h-full object-contain p-1"
                 onError={(e) => { e.target.style.display = 'none'; }} />
               {/* hover overlay */}
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity
@@ -266,7 +260,7 @@ function ImagePicker({ value, onChange }) {
           </div>
 
           {/* Lightbox portal */}
-          {lightbox && <ImageLightbox src={value} onClose={() => setLightbox(false)} />}
+          {lightbox && <ImageLightbox src={toImgSrc(value)} href={value} onClose={() => setLightbox(false)} />}
         </>
       )}
     </div>
@@ -294,9 +288,18 @@ function LabelPills({ product }) {
 
 const BLANK = { name: '', sku: '', barcode: '', categoryId: '', mrp: '', discountPrice: '', stockQty: '', unit: 'piece', imageUrl: '', description: '', isActive: true, isBestSeller: false, isClearance: false, isWeeklySaver: false };
 
-function ProductModal({ product, categories, onClose, onSave }) {
+function ProductModal({ product, categories, storeId, onClose, onSave }) {
   const isEdit = !!product?.id;
-  const [form, setForm]     = useState(product ? { ...product, categoryId: product.category?.id || product.categoryId || '' } : BLANK);
+  const [form, setForm]     = useState(() => {
+    if (!product) return BLANK;
+    const base = { ...product, categoryId: product.category?.id || product.categoryId || '' };
+    // When editing within a store context, pre-fill pricing with store-specific values if available
+    if (storeId) {
+      if (product.storeMrp           != null) base.mrp           = product.storeMrp;
+      if (product.storeDiscountPrice != null) base.discountPrice = product.storeDiscountPrice;
+    }
+    return base;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
 
@@ -306,7 +309,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      if (isEdit) await adminApi.updateProduct(product.id, form);
+      if (isEdit) await adminApi.updateProduct(product.id, { ...form, storeId: storeId || undefined });
       else        await adminApi.createProduct(form);
       onSave();
     } catch (err) {
@@ -350,9 +353,15 @@ function ProductModal({ product, categories, onClose, onSave }) {
             </select>
           </div>
 
+          {storeId && isEdit && (
+            <div className="bg-blue-950/40 border border-blue-800/50 rounded-xl px-3 py-2 text-xs text-blue-300">
+              Pricing changes will apply to this store only. Other stores keep their own prices.
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-3">
-            {field('MRP (₹) *', 'mrp', 'number', { min: 0, step: '0.01', required: true })}
-            {field('Sale Price (₹) *', 'discountPrice', 'number', { min: 0, step: '0.01', required: true })}
+            {field(storeId && isEdit ? 'MRP (₹) — Store' : 'MRP (₹) *', 'mrp', 'number', { min: 0, step: '0.01', required: true })}
+            {field(storeId && isEdit ? 'Sale Price (₹) — Store' : 'Sale Price (₹) *', 'discountPrice', 'number', { min: 0, step: '0.01', required: true })}
             {field('Stock Qty', 'stockQty', 'number', { min: 0 })}
           </div>
 
@@ -408,6 +417,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AdminProductsPage() {
+  const { selectedStore }         = useAdminStoreStore();
   const [products, setProducts]   = useState([]);
   const [categories, setCategories] = useState([]);
   const [total, setTotal]         = useState(0);
@@ -418,7 +428,7 @@ export default function AdminProductsPage() {
   const [catFilter, setCatFilter] = useState('');
   const [labelFilter, setLabelFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [modal, setModal]         = useState(null); // null | { product? }
+  const [modal, setModal]         = useState(null);
   const [delConfirm, setDelConfirm] = useState(null);
   const [error, setError]         = useState('');
   const [toast, setToast]         = useState('');
@@ -428,11 +438,20 @@ export default function AdminProductsPage() {
   const load = useCallback(async (pg = 1) => {
     setLoading(true); setError('');
     try {
-      const r = await adminApi.getProducts({ page: pg, limit: 20, search: search || undefined, category: catFilter || undefined, label: labelFilter || undefined, status: statusFilter || undefined });
+      const r = await adminApi.getProducts({
+        page: pg, limit: 20,
+        search:   search      || undefined,
+        category: catFilter   || undefined,
+        label:    labelFilter || undefined,
+        status:   statusFilter || undefined,
+        // Pass storeId so the API returns StoreProduct data (storeActive/storeStock)
+        // for this specific store alongside the global product fields.
+        storeId:  selectedStore?.id || undefined,
+      });
       setProducts(r.products || []); setTotal(r.total || 0); setTotalPages(r.totalPages || 1);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [search, catFilter, labelFilter, statusFilter]);
+  }, [search, catFilter, labelFilter, statusFilter, selectedStore?.id]);
 
   useEffect(() => {
     adminApi.getCategories().then((r) => setCategories(r.categories || [])).catch(() => {});
@@ -451,12 +470,42 @@ export default function AdminProductsPage() {
 
   const handleSave = () => { setModal(null); showToast('✅ Product saved'); load(page); };
 
+  // ── Visibility toggle ─────────────────────────────────────────────────────
+  // When a store is selected  → toggle StoreProduct.isActive for THAT STORE ONLY.
+  //   This creates a StoreProduct record if one doesn't exist yet.
+  // When global view (no store) → toggle the global Product.isActive field.
   const handleToggle = async (product) => {
     try {
-      await adminApi.updateProduct(product.id, { isActive: !product.isActive });
-      setProducts((prev) => prev.map((p) => p.id === product.id ? { ...p, isActive: !product.isActive } : p));
+      if (selectedStore) {
+        // Store-scoped: use StoreProduct upsert so only this store is affected
+        const currentActive = product.storeActive ?? true; // treat un-configured as active
+        const currentStock  = product.storeStock  ?? product.stockQty ?? 0;
+        await adminApi.upsertStoreProduct(product.id, {
+          storeId:  selectedStore.id,
+          isActive: !currentActive,
+          stockQty: currentStock,
+        });
+        setProducts((prev) => prev.map((p) =>
+          p.id === product.id ? { ...p, storeActive: !currentActive, configured: true } : p
+        ));
+        showToast(!currentActive ? '✅ Visible in this store' : '🔕 Hidden from this store only');
+      } else {
+        // Global: toggle Product.isActive (removes from ALL stores — warn in UI)
+        await adminApi.updateProduct(product.id, { isActive: !product.isActive });
+        setProducts((prev) => prev.map((p) =>
+          p.id === product.id ? { ...p, isActive: !product.isActive } : p
+        ));
+      }
     } catch (e) { showToast(`❌ ${e.message}`); }
   };
+
+  // Column headers change based on whether a store is selected
+  const TABLE_HEADERS = ['Product', 'Category', 'MRP / Price',
+    selectedStore ? 'Store Stock' : 'Stock',
+    'Labels',
+    selectedStore ? `Visible (${selectedStore.name.split(' ')[0]})` : 'Visible',
+    'Actions',
+  ];
 
   return (
     <AdminLayout>
@@ -473,6 +522,21 @@ export default function AdminProductsPage() {
             <span className="text-base">+</span> Add Product
           </button>
         </div>
+
+        {/* Store visibility scope banner */}
+        {selectedStore && (
+          <div className="bg-blue-950/40 border border-blue-800/50 rounded-xl px-4 py-2.5 flex items-start gap-2.5">
+            <span className="text-blue-400 text-base mt-0.5 flex-shrink-0">ℹ️</span>
+            <div>
+              <p className="text-blue-300 text-xs font-semibold">Store-scoped visibility active</p>
+              <p className="text-blue-400/70 text-xs mt-0.5">
+                The <span className="font-bold">Visible</span> toggle below only affects <span className="font-bold">{selectedStore.name}</span>.
+                Toggling it will NOT change product visibility in other stores.
+                Use <span className="font-bold">Global view</span> (All Stores) to remove a product from the entire catalog.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2">
@@ -506,7 +570,7 @@ export default function AdminProductsPage() {
             <table className="w-full min-w-[700px]">
               <thead className="bg-gray-800 border-b border-gray-700">
                 <tr>
-                  {['Product', 'Category', 'MRP / Price', 'Stock', 'Labels', 'Visible', 'Actions'].map((h) => (
+                  {TABLE_HEADERS.map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -520,46 +584,91 @@ export default function AdminProductsPage() {
                   ))
                 ) : products.length === 0 ? (
                   <tr><td colSpan={7} className="text-center py-12 text-gray-500">No products found</td></tr>
-                ) : products.map((p) => (
-                  <tr key={p.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-gray-800 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
-                          {p.imageUrl ? <img src={p.imageUrl} alt="" className="w-full h-full object-contain p-0.5" /> : <span className="text-lg">📦</span>}
+                ) : products.map((p) => {
+                  // Determine which stock and visibility values to display
+                  const displayStock   = selectedStore && p.storeStock  != null ? p.storeStock  : p.stockQty;
+                  const displayVisible = selectedStore
+                    ? (p.storeActive != null ? p.storeActive : true)  // null = not yet configured → treat as active
+                    : p.isActive;
+                  const isUnconfigured = selectedStore && !p.configured;
+
+                  return (
+                    <tr key={p.id} className={`border-b border-gray-800 hover:bg-gray-800/30 transition-colors ${!p.isActive ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 bg-gray-800 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
+                            {p.imageUrl ? <img src={toImgSrc(p.imageUrl)} alt="" className="w-full h-full object-contain p-0.5" /> : <span className="text-lg">📦</span>}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white truncate max-w-[140px]">{p.name}</p>
+                            <p className="text-xs text-gray-500">{p.sku}</p>
+                          </div>
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-300">{p.category?.name}</td>
+                      <td className="px-4 py-3">
+                        {selectedStore && (p.storeMrp != null || p.storeDiscountPrice != null) ? (
+                          <>
+                            <p className="text-xs text-gray-500 line-through">₹{p.storeMrp ?? p.mrp}</p>
+                            <p className="text-sm font-bold text-green-400">₹{p.storeDiscountPrice ?? p.discountPrice}</p>
+                            <p className="text-[10px] text-blue-400 mt-0.5">store price</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs text-gray-500 line-through">₹{p.mrp}</p>
+                            <p className="text-sm font-bold text-green-400">₹{p.discountPrice}</p>
+                          </>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <div>
-                          <p className="text-sm font-semibold text-white truncate max-w-[140px]">{p.name}</p>
-                          <p className="text-xs text-gray-500">{p.sku}</p>
+                          <span className={`text-sm font-bold ${displayStock === 0 ? 'text-red-400' : displayStock < 10 ? 'text-yellow-400' : 'text-gray-300'}`}>
+                            {displayStock ?? '—'}
+                          </span>
+                          {selectedStore && p.storeStock == null && (
+                            <p className="text-[9px] text-gray-600 mt-0.5">global</p>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-300">{p.category?.name}</td>
-                    <td className="px-4 py-3">
-                      <p className="text-xs text-gray-500 line-through">₹{p.mrp}</p>
-                      <p className="text-sm font-bold text-green-400">₹{p.discountPrice}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-sm font-bold ${p.stockQty === 0 ? 'text-red-400' : p.stockQty < 10 ? 'text-yellow-400' : 'text-gray-300'}`}>
-                        {p.stockQty}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3"><LabelPills product={p} /></td>
-                    <td className="px-4 py-3">
-                      <button onClick={() => handleToggle(p)}
-                        className={`w-10 h-5 rounded-full transition-colors ${p.isActive ? 'bg-brand-600' : 'bg-gray-700'}`}>
-                        <div className={`w-4 h-4 mt-0.5 mx-0.5 bg-white rounded-full shadow transition-transform ${p.isActive ? 'translate-x-5' : 'translate-x-0'}`} />
-                      </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1">
-                        <button onClick={() => setModal(p)}
-                          className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition-colors">Edit</button>
-                        <button onClick={() => setDelConfirm(p)}
-                          className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400 text-xs font-semibold rounded-lg transition-colors">Del</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3"><LabelPills product={p} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <Tooltip
+                            text={selectedStore
+                              ? `Toggle visibility for ${selectedStore.name} only`
+                              : 'Toggle global visibility (affects ALL stores)'}
+                            position="left">
+                            <button onClick={() => handleToggle(p)}
+                              className={`w-10 h-5 rounded-full transition-colors
+                                ${selectedStore
+                                  ? (displayVisible ? 'bg-brand-600' : 'bg-gray-700')
+                                  : (p.isActive    ? 'bg-brand-600' : 'bg-gray-700')
+                                }`}>
+                              <div className={`w-4 h-4 mt-0.5 mx-0.5 bg-white rounded-full shadow transition-transform ${displayVisible ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                          </Tooltip>
+                          {isUnconfigured && (
+                            <Tooltip text="No inventory record for this store — go to Inventory to configure" position="left">
+                              <span className="text-[9px] text-yellow-500 leading-tight cursor-help">not set</span>
+                            </Tooltip>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <Tooltip text="Edit product details" position="top">
+                            <button onClick={() => setModal(p)}
+                              className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition-colors">Edit</button>
+                          </Tooltip>
+                          <Tooltip text="Delete this product permanently" position="top">
+                            <button onClick={() => setDelConfirm(p)}
+                              className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400 text-xs font-semibold rounded-lg transition-colors">Del</button>
+                          </Tooltip>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -579,7 +688,7 @@ export default function AdminProductsPage() {
 
       {/* Product modal */}
       {modal !== null && (
-        <ProductModal product={modal?.id ? modal : null} categories={categories} onClose={() => setModal(null)} onSave={handleSave} />
+        <ProductModal product={modal?.id ? modal : null} categories={categories} storeId={selectedStore?.id || null} onClose={() => setModal(null)} onSave={handleSave} />
       )}
 
       {/* Delete confirm */}

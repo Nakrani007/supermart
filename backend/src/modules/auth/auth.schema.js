@@ -74,6 +74,9 @@ export const AddressSchema = z.object({
   pincode:  z.string().regex(/^\d{6}$/),
   landmark: z.string().optional(),
   isDefault: z.boolean().optional(),
+  // Optional GPS pin — stored to show delivery zone status on the address card
+  lat:      z.number().min(-90).max(90).optional(),
+  lng:      z.number().min(-180).max(180).optional(),
 });
 
 // ─── Update Profile ───────────────────────────────────────────────────────────

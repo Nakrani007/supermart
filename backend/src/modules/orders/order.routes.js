@@ -7,8 +7,10 @@ import * as ctrl from './order.controller.js';
 
 export const orderRouter = Router();
 
-// Public — guests need to see slots before deciding to login
-orderRouter.get('/slots', ctrl.getDeliverySlots);
+// Public — no auth needed for these
+orderRouter.get('/slots',           ctrl.getDeliverySlots);
+orderRouter.get('/delivery-zone',   ctrl.getDeliveryZone);
+orderRouter.get('/:id/tracking',    ctrl.getDeliveryTracking);
 
 // Everything below requires a valid JWT
 orderRouter.use(requireAuth);

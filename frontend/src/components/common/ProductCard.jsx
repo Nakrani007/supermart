@@ -141,34 +141,40 @@ export default function ProductCard({ product, lang = 'en', compact = false }) {
         {/* Unit */}
         <p className={`text-gray-400 mb-2 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>{product.unit}</p>
 
-        {/* ── Cart control ────────────────────────────────────────────── */}
+        {/* ── Cart control — fixed height so card never grows ─────────── */}
         {outOfStock ? (
           <button disabled
-            className="w-full py-2 text-xs font-semibold border border-gray-200 rounded-lg
-                       text-gray-400 cursor-not-allowed">
+            className={`w-full flex items-center justify-center text-xs font-semibold border
+                        border-gray-200 rounded-lg text-gray-400 cursor-not-allowed
+                        ${compact ? 'h-8' : 'h-9'}`}>
             Out of Stock
           </button>
         ) : qty === 0 ? (
           <button onClick={handleAdd}
             className={`w-full font-bold rounded-lg flex items-center justify-center gap-1.5
                         bg-brand-600 text-white hover:bg-brand-700 active:scale-95 transition-all
-                        ${adding ? 'scale-95' : ''} ${compact ? 'py-1.5 text-[10px]' : 'py-2 text-xs'}`}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        ${adding ? 'scale-95' : ''} ${compact ? 'h-8 text-[10px]' : 'h-9 text-xs'}`}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
                 d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
             ADD TO CART
           </button>
         ) : (
-          <div className="flex items-center border-2 border-brand-600 rounded-lg overflow-hidden">
+          <div className={`flex items-stretch border-2 border-brand-600 rounded-lg overflow-hidden
+                           ${compact ? 'h-8' : 'h-9'}`}>
             <button onClick={() => updateQuantity(product.id, qty - 1)}
-              className="flex-1 py-1.5 text-brand-600 text-lg font-bold hover:bg-brand-50 active:bg-brand-100 transition-colors">
+              className="flex-1 flex items-center justify-center text-brand-600 text-base font-bold
+                         hover:bg-brand-50 active:bg-brand-100 transition-colors">
               −
             </button>
-            <span className="px-3 text-sm font-bold text-brand-600 min-w-[2rem] text-center">{qty}</span>
+            <span className="flex items-center justify-center px-2 text-sm font-bold text-brand-600
+                             min-w-[2rem] border-x border-brand-200">
+              {qty}
+            </span>
             <button onClick={handleAdd} disabled={qty >= product.stockQty}
-              className="flex-1 py-1.5 text-brand-600 text-lg font-bold hover:bg-brand-50
-                         disabled:opacity-30 active:bg-brand-100 transition-colors">
+              className="flex-1 flex items-center justify-center text-brand-600 text-base font-bold
+                         hover:bg-brand-50 disabled:opacity-30 active:bg-brand-100 transition-colors">
               +
             </button>
           </div>

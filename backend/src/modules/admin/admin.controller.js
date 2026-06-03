@@ -18,15 +18,16 @@ export const login = wrap(async (req, res) => {
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
 export const getMetrics = wrap(async (req, res) => {
-  const metrics = await svc.getAdminMetrics();
+  const { storeId } = req.query;
+  const metrics = await svc.getAdminMetrics(storeId || null);
   ok(res, { metrics });
 });
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 
 export const getProducts = wrap(async (req, res) => {
-  const { page = '1', limit = '20', search, category, label, status } = req.query;
-  const result = await svc.getAdminProductsService({ page: +page, limit: Math.min(+limit, 100), search, categorySlug: category, label, status });
+  const { page = '1', limit = '20', search, category, label, status, storeId } = req.query;
+  const result = await svc.getAdminProductsService({ page: +page, limit: Math.min(+limit, 100), search, categorySlug: category, label, status, storeId: storeId || null });
   ok(res, result);
 });
 
@@ -36,7 +37,8 @@ export const createProduct = wrap(async (req, res) => {
 });
 
 export const updateProduct = wrap(async (req, res) => {
-  const product = await svc.updateProductService(req.params.id, req.body);
+  const storeId = req.body.storeId || req.query.storeId || null;
+  const product = await svc.updateProductService(req.params.id, req.body, storeId);
   ok(res, { product });
 });
 
@@ -152,6 +154,45 @@ export const updateDeliveryConfig = wrap(async (req, res) => {
   ok(res, { config });
 });
 
+// ─── Stores ───────────────────────────────────────────────────────────────────
+
+export const getStores = wrap(async (req, res) => {
+  const stores = await svc.getStoresService();
+  ok(res, { stores });
+});
+
+export const createStore = wrap(async (req, res) => {
+  const store = await svc.createStoreService(req.body);
+  res.status(201).json({ success: true, store });
+});
+
+export const updateStore = wrap(async (req, res) => {
+  const store = await svc.updateStoreService(req.params.id, req.body);
+  ok(res, { store });
+});
+
+export const deleteStore = wrap(async (req, res) => {
+  await svc.deleteStoreService(req.params.id);
+  ok(res, { message: 'Store deleted' });
+});
+
+export const setMainStore = wrap(async (req, res) => {
+  const store = await svc.setMainStoreService(req.params.id);
+  ok(res, { store });
+});
+
+// ─── Delivery Zone ────────────────────────────────────────────────────────────
+
+export const getDeliveryZone = wrap(async (req, res) => {
+  const zone = await svc.getDeliveryZoneService();
+  ok(res, { zone });
+});
+
+export const updateDeliveryZone = wrap(async (req, res) => {
+  const zone = await svc.updateDeliveryZoneService(req.body);
+  ok(res, { zone });
+});
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const getUsers = wrap(async (req, res) => {
@@ -180,4 +221,49 @@ export const uploadImage = wrap(async (req, res) => {
   const imageUrl = await saveFile(req.file, baseUrl);
 
   ok(res, { imageUrl, filename: req.file.originalname, size: req.file.size });
+});
+
+// ─── AI Image Proxy ───────────────────────────────────────────────────────────
+// Fetches Pollinations.ai server-side so the browser never hits a CORS wall.
+
+export const proxyImage = wrap(async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ success: false, message: 'url query param required' });
+
+  let parsed;
+  try { parsed = new URL(url); } catch {
+    return res.status(400).json({ success: false, message: 'Invalid URL' });
+  }
+  if (!parsed.hostname.endsWith('pollinations.ai')) {
+    return res.status(403).json({ success: false, message: 'Only pollinations.ai URLs are allowed' });
+  }
+
+  const upstream = await fetch(url);
+  if (!upstream.ok) return res.status(502).json({ success: false, message: 'Upstream image fetch failed' });
+
+  const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+  const buffer = Buffer.from(await upstream.arrayBuffer());
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.send(buffer);
+});
+
+// ─── Store Inventory ──────────────────────────────────────────────────────────
+
+export const getStoreInventory = wrap(async (req, res) => {
+  const { storeId, page = '1', limit = '30', search, category } = req.query;
+  if (!storeId) return res.status(400).json({ success: false, message: 'storeId query param required' });
+  const result = await svc.getStoreInventoryService(storeId, {
+    page: +page, limit: Math.min(+limit, 100), search, categorySlug: category,
+  });
+  ok(res, result);
+});
+
+export const upsertStoreProduct = wrap(async (req, res) => {
+  const { productId } = req.params;
+  const { storeId, stockQty, isActive } = req.body;
+  if (!storeId) return res.status(400).json({ success: false, message: 'storeId is required' });
+  const sp = await svc.upsertStoreProductService(storeId, productId, { stockQty, isActive });
+  ok(res, { storeProduct: sp });
 });

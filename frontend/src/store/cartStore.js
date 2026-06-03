@@ -24,13 +24,14 @@ export const useCartStore = create((set, get) => ({
 
     let updated;
     if (existing) {
-      // Don't exceed available stock
-      const newQty = Math.min(existing.quantity + quantity, product.stockQty);
+      const maxQty = product.stockQty ?? Infinity;
+      const newQty = Math.min(existing.quantity + quantity, maxQty);
       updated = items.map((i) =>
         i.product.id === product.id ? { ...i, quantity: newQty } : i
       );
     } else {
-      updated = [...items, { product, quantity: Math.min(quantity, product.stockQty) }];
+      const maxQty = product.stockQty ?? Infinity;
+      updated = [...items, { product, quantity: Math.min(quantity, maxQty) }];
     }
 
     saveCart(updated);

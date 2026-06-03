@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { productsApi } from '../api/products.api.js';
+import { useStoreSelectionStore } from '../store/storeSelectionStore.js';
 import Header from '../components/layout/Header.jsx';
 import Footer from '../components/layout/Footer.jsx';
 import HeroCarousel from '../components/home/HeroCarousel.jsx';
@@ -30,7 +31,7 @@ function PromoBanner({ from, to, eyebrow, headline, cta, ctaLink, emoji }) {
   const navigate = useNavigate();
   return (
     <div className={`bg-gradient-to-r ${from} ${to}`}>
-      <div className="max-w-[1400px] mx-auto px-5 py-6 flex items-center justify-between">
+      <div className="px-5 py-6 flex items-center justify-between">
       <div className="flex-1 min-w-0 pr-4">
         {eyebrow && (
           <p className="text-[9px] font-extrabold text-white/60 uppercase tracking-widest mb-1">{eyebrow}</p>
@@ -56,6 +57,7 @@ function PromoBanner({ from, to, eyebrow, headline, cta, ctaLink, emoji }) {
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { selectedStore } = useStoreSelectionStore();
 
   // Section visibility whitelist from admin config (null = not yet resolved)
   const [visibleSections, setVisibleSections] = useState(null);
@@ -95,11 +97,13 @@ export default function HomePage() {
 
   // ── 2. Labeled + essential products ──────────────────────────────────────
   useEffect(() => {
+    const sid = selectedStore?.id;
+    setDealsLoading(true);
     Promise.all([
-      productsApi.getLabeledProducts('clearance',   10).catch(() => ({ products: [] })),
-      productsApi.getLabeledProducts('weeklySaver', 10).catch(() => ({ products: [] })),
-      productsApi.getLabeledProducts('bestSeller',  10).catch(() => ({ products: [] })),
-      productsApi.getDailyEssentials().catch(() => ({ products: [] })),
+      productsApi.getLabeledProducts('clearance',   10, sid).catch(() => ({ products: [] })),
+      productsApi.getLabeledProducts('weeklySaver', 10, sid).catch(() => ({ products: [] })),
+      productsApi.getLabeledProducts('bestSeller',  10, sid).catch(() => ({ products: [] })),
+      productsApi.getDailyEssentials(sid).catch(() => ({ products: [] })),
     ]).then(([c, w, b, e]) => {
       setClearanceProducts(c.products   || []);
       setWeeklySaverProducts(w.products || []);
@@ -107,15 +111,16 @@ export default function HomePage() {
       setEssentials(e.products          || []);
       setDealsLoading(false);
     });
-  }, []);
+  }, [selectedStore?.id]); // eslint-disable-line
 
   // ── 3. Product grid ───────────────────────────────────────────────────────
   useEffect(() => {
-    productsApi.getAll({ limit: 12 })
+    setGridLoading(true);
+    productsApi.getAll({ limit: 12, ...(selectedStore && { storeId: selectedStore.id }) })
       .then((r) => setProducts(r.products || []))
       .catch(() => {})
       .finally(() => setGridLoading(false));
-  }, []);
+  }, [selectedStore?.id]); // eslint-disable-line
 
   // showSection: visible if sections not yet configured, or key is in the set
   const showSection = (key) =>
@@ -125,9 +130,9 @@ export default function HomePage() {
     <div className="min-h-screen bg-gray-100">
       <Header />
 
-      {/* ── Delivery info bar ── */}
+      {/* ── Delivery info bar — full-width strip ── */}
       <div className="bg-green-600">
-        <div className="max-w-[1400px] mx-auto px-4 py-1.5 flex items-center gap-2">
+        <div className="max-w-[1280px] mx-auto px-4 py-1.5 flex items-center gap-2">
           <span className="text-[11px] font-bold text-white">⚡ Earliest Delivery:</span>
           <span className="text-[11px] text-green-100 ml-auto font-medium">
             🕐 {deliveryMsg || 'Delivery in 2–4 hours'}
@@ -136,21 +141,25 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* ── Hero Carousel — full-width for visual impact ── */}
-      {showSection('hero-banners') && <HeroCarousel />}
+      {/* ── All page content constrained to max-w-[1280px] ── */}
+      <div className="max-w-[1280px] mx-auto w-full px-3 pb-4">
 
-      {/* ── Contained sections ── */}
-      <div className="max-w-[1400px] mx-auto w-full">
+        {/* ── Hero Carousel ── */}
+        {showSection('hero-banners') && (
+          <div className="mt-3 rounded-2xl overflow-hidden shadow-sm">
+            <HeroCarousel />
+          </div>
+        )}
 
         {/* ── Category grid ── */}
         {showSection('popular-categories') && (
-          <div className="mt-2">
+          <div className="mt-3 rounded-2xl overflow-hidden">
             <CategoryGrid />
           </div>
         )}
 
         {/* ── Deal rows ── */}
-        <div className="mt-2">
+        <div className="mt-3">
           <DealsSection
             loading={dealsLoading}
             clearanceProducts={showSection('clearance')        ? clearanceProducts   : []}
@@ -160,36 +169,33 @@ export default function HomePage() {
           />
         </div>
 
-      </div>
+        {/* ── Promo banner 1 ── */}
+        <div className="mt-3 rounded-2xl overflow-hidden shadow-sm">
+          <PromoBanner
+            from="from-teal-500" to="to-cyan-500"
+            eyebrow="The Summer Store"
+            headline={"Stay Cool\nThis Season"}
+            cta="SHOP NOW"
+            ctaLink="/products?category=beverages"
+            emoji="🌞"
+          />
+        </div>
 
-      {/* ── Promo strip 1 — full-width gradient bg, contained content ── */}
-      <div className="mt-2">
-        <PromoBanner
-          from="from-teal-500" to="to-cyan-500"
-          eyebrow="The Summer Store"
-          headline={"Stay Cool\nThis Season"}
-          cta="SHOP NOW"
-          ctaLink="/products?category=beverages"
-          emoji="🌞"
-        />
-      </div>
+        {/* ── Promo banner 2 ── */}
+        <div className="mt-3 rounded-2xl overflow-hidden shadow-sm">
+          <PromoBanner
+            from="from-yellow-400" to="to-amber-500"
+            eyebrow="Super Saver"
+            headline={"The Half\nPrice Store"}
+            cta="SHOP DEALS"
+            ctaLink="/products?sort=discount"
+            emoji="🏷️"
+          />
+        </div>
 
-      {/* ── Promo strip 2 — full-width gradient bg, contained content ── */}
-      <div className="mt-2">
-        <PromoBanner
-          from="from-yellow-400" to="to-amber-500"
-          eyebrow="Super Saver"
-          headline={"The Half\nPrice Store"}
-          cta="SHOP DEALS"
-          ctaLink="/products?sort=discount"
-          emoji="🏷️"
-        />
-      </div>
-
-      {/* ── All Products grid ── */}
-      {showSection('product-grid') && (
-        <section className="bg-white mt-2 py-4">
-          <div className="max-w-[1400px] mx-auto">
+        {/* ── All Products grid ── */}
+        {showSection('product-grid') && (
+          <section className="bg-white mt-3 py-4 rounded-2xl shadow-sm">
             <div className="flex items-center justify-between px-4 mb-3">
               <h2 className="text-[15px] font-bold text-gray-800">All Products</h2>
               <button onClick={() => navigate('/products')}
@@ -203,7 +209,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 px-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 px-3">
               {gridLoading
                 ? [...Array(8)].map((_, i) => <ProductSkeleton key={i} />)
                 : products.map((p) => <ProductCard key={p.id} product={p} />)}
@@ -218,9 +224,10 @@ export default function HomePage() {
                 </button>
               </div>
             )}
-          </div>
-        </section>
-      )}
+          </section>
+        )}
+
+      </div>
 
       {/* ── Footer ── */}
       <Footer />

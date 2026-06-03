@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Tip from '../components/common/Tooltip.jsx';
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import AdminLayout from './AdminLayout.jsx';
-import { adminApi } from '../api/admin.api.js';
+import AdminLayout        from './AdminLayout.jsx';
+import { adminApi }       from '../api/admin.api.js';
+import { useAdminStoreStore } from '../store/adminStoreStore.js';
 
 const STATUS_META = {
   PENDING:          { label: 'Pending',         color: 'bg-yellow-400' },
@@ -72,13 +74,18 @@ function RevenueChart({ revenueByDay, revenueByMonth, revenueByYear }) {
           <p className="text-xs text-gray-400">Total: {fmtFull(total)}</p>
         </div>
         <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
-          {CHART_TABS.map(({ key, label }) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
-                ${tab === key ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              {label}
-            </button>
-          ))}
+          {CHART_TABS.map(({ key, label }) => {
+            const tabTip = { daily: 'Last 30 days', monthly: 'Last 12 months', yearly: 'Last 5 years' };
+            return (
+              <Tip key={key} text={tabTip[key]} position="top">
+                <button onClick={() => setTab(key)}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
+                    ${tab === key ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                  {label}
+                </button>
+              </Tip>
+            );
+          })}
         </div>
       </div>
       <ResponsiveContainer width="100%" height={200}>
@@ -157,14 +164,16 @@ function OrderStatusGrid({ ordersByStatus, total, navigate }) {
           const m = STATUS_META[status] || { label: status, color: 'bg-gray-400' };
           const pct = total ? Math.round((count / total) * 100) : 0;
           return (
-            <button key={status}
-              onClick={() => navigate(`/admin/orders?status=${status}`)}
-              className="bg-gray-800 hover:bg-gray-750 rounded-xl p-2.5 text-center transition-colors active:scale-[.97]">
-              <div className={`w-2 h-2 rounded-full ${m.color} mx-auto mb-1`} />
-              <p className="text-lg font-bold text-white">{count}</p>
-              <p className="text-[9px] text-gray-400 uppercase tracking-wide leading-tight">{m.label}</p>
-              <p className="text-[9px] text-gray-600 mt-0.5">{pct}%</p>
-            </button>
+            <Tip key={status} text={`${count} orders (${pct}% of total) — click to view`} position="top">
+              <button
+                onClick={() => navigate(`/admin/orders?status=${status}`)}
+                className="w-full bg-gray-800 hover:bg-gray-750 rounded-xl p-2.5 text-center transition-colors active:scale-[.97]">
+                <div className={`w-2 h-2 rounded-full ${m.color} mx-auto mb-1`} />
+                <p className="text-lg font-bold text-white">{count}</p>
+                <p className="text-[9px] text-gray-400 uppercase tracking-wide leading-tight">{m.label}</p>
+                <p className="text-[9px] text-gray-600 mt-0.5">{pct}%</p>
+              </button>
+            </Tip>
           );
         })}
       </div>
@@ -213,16 +222,21 @@ function RecentOrders({ orders, navigate }) {
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
+  const { selectedStore } = useAdminStoreStore();
   const [metrics, setMetrics]   = useState(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
 
-  useEffect(() => {
-    adminApi.getMetrics()
+  const loadMetrics = (store) => {
+    setLoading(true); setError('');
+    const params = store ? { storeId: store.id } : {};
+    adminApi.getMetrics(params)
       .then((res) => setMetrics(res.metrics))
       .catch((err) => setError(err.message || 'Failed to load metrics'))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadMetrics(selectedStore); }, [selectedStore?.id]); // eslint-disable-line
 
   const totalOrders = metrics ? Object.values(metrics.ordersByStatus || {}).reduce((s, v) => s + v, 0) : 0;
 
@@ -236,12 +250,14 @@ export default function AdminDashboardPage() {
             <h1 className="text-xl font-bold text-white">Dashboard</h1>
             <p className="text-gray-400 text-sm">Store analytics & insights</p>
           </div>
-          <button onClick={() => { setLoading(true); setError(''); adminApi.getMetrics().then((r) => { setMetrics(r.metrics); setLoading(false); }).catch(() => setLoading(false)); }}
-            className="w-9 h-9 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded-xl text-gray-400 hover:text-white transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+          <Tip text="Refresh dashboard metrics" position="left">
+            <button onClick={() => loadMetrics(selectedStore)}
+              className="w-9 h-9 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded-xl text-gray-400 hover:text-white transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </Tip>
         </div>
 
         {loading && (
@@ -267,7 +283,7 @@ export default function AdminDashboardPage() {
             </div>
 
             {/* ── Orders + Users quick stats ────────────────────────────────── */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className={`grid gap-3 ${selectedStore && metrics.invStats ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
               <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
                 <p className="text-2xl font-bold text-white">{metrics.orders.today}</p>
                 <p className="text-xs text-gray-400 mt-1">Orders Today</p>
@@ -280,6 +296,17 @@ export default function AdminDashboardPage() {
                 <p className="text-2xl font-bold text-white">{metrics.totalUsers}</p>
                 <p className="text-xs text-gray-400 mt-1">Total Users</p>
               </div>
+              {selectedStore && metrics.inventory && (
+                <Tip text={`${metrics.inventory.outOfStock} out of stock · ${metrics.inventory.lowStock} low stock (< 5 units)`} position="top">
+                  <div className="bg-brand-950/40 border border-brand-800/50 rounded-2xl p-4 text-center col-span-2 md:col-span-1 cursor-help">
+                    <p className="text-2xl font-bold text-brand-400">{metrics.inventory.total}</p>
+                    <p className="text-xs text-brand-300/70 mt-1">SKUs Configured</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      {metrics.inventory.outOfStock} out · {metrics.inventory.lowStock} low
+                    </p>
+                  </div>
+                </Tip>
+              )}
             </div>
 
             {/* ── Revenue Chart ─────────────────────────────────────────────── */}

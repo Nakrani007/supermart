@@ -131,49 +131,57 @@ export default function SubscribedListPage() {
     <div className="min-h-screen bg-gray-100 flex flex-col">
       <Header showSearch={false} />
 
-      <div className="bg-white border-b border-gray-200 px-4 py-3">
-        <h1 className="text-base font-bold text-gray-800">My Subscribed List</h1>
-        <p className="text-xs text-gray-400">{active.length} active subscription{active.length !== 1 ? 's' : ''}</p>
-      </div>
+      {/* ── Constrained content area ─────────────────────────────────────── */}
+      <div className="flex-1 w-full max-w-2xl mx-auto px-4 pb-10">
 
-      {/* Info banner */}
-      <div className="mx-3 mt-3 bg-brand-50 border border-brand-200 rounded p-3 flex items-start gap-2">
-        <span className="text-xl flex-shrink-0">🔄</span>
-        <div>
-          <p className="text-xs font-bold text-brand-700">How subscriptions work</p>
-          <p className="text-[11px] text-brand-600 mt-0.5 leading-relaxed">
-            Subscribe to products you buy regularly. We'll remind you before each delivery cycle. Modify or cancel anytime.
-          </p>
+        {/* Page title */}
+        <div className="bg-white border border-gray-200 rounded-xl mt-5 px-4 py-3 flex items-center justify-between">
+          <div>
+            <h1 className="text-base font-bold text-gray-800">My Subscriptions</h1>
+            <p className="text-xs text-gray-400">{active.length} active subscription{active.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {/* Info banner */}
+        <div className="mt-3 bg-brand-50 border border-brand-200 rounded-xl p-3 flex items-start gap-2">
+          <span className="text-xl flex-shrink-0">🔄</span>
+          <div>
+            <p className="text-xs font-bold text-brand-700">How subscriptions work</p>
+            <p className="text-[11px] text-brand-600 mt-0.5 leading-relaxed">
+              Subscribe to products you buy regularly. We'll remind you before each delivery cycle. Modify or cancel anytime.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {active.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
+              <div className="text-6xl mb-4">🔄</div>
+              <p className="text-base font-bold text-gray-700">No active subscriptions</p>
+              <p className="text-sm text-gray-400 mt-1">Subscribe to products you buy regularly and never run out</p>
+              <button onClick={() => navigate('/products')}
+                className="mt-5 px-6 py-2.5 bg-brand-600 text-white font-bold rounded-xl text-sm
+                           hover:bg-brand-700 active:scale-95 transition-all">
+                Browse Products
+              </button>
+            </div>
+          ) : (
+            <>
+              {active.map((sub) => <SubscriptionCard key={sub.id} sub={sub} />)}
+
+              <div className="bg-white border border-gray-200 rounded-xl p-4 mt-2">
+                <p className="text-xs font-bold text-gray-700 mb-1">💡 Subscribe more products</p>
+                <p className="text-xs text-gray-400">Visit any product page to subscribe for regular delivery</p>
+                <button onClick={() => navigate('/products')}
+                  className="mt-3 w-full py-2 border border-brand-600 text-brand-600 font-bold text-xs rounded-xl hover:bg-brand-50 transition-colors">
+                  Browse & Subscribe
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="p-3 space-y-2">
-        {active.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded border border-gray-200">
-            <div className="text-6xl mb-4">🔄</div>
-            <p className="text-base font-bold text-gray-700">No active subscriptions</p>
-            <p className="text-sm text-gray-400 mt-1">Subscribe to products you buy regularly and never run out</p>
-            <button onClick={() => navigate('/products')}
-              className="mt-5 px-6 py-2.5 bg-brand-600 text-white font-bold rounded text-sm
-                         hover:bg-brand-700 active:scale-95 transition-all">
-              Browse Products
-            </button>
-          </div>
-        ) : (
-          <>
-            {active.map((sub) => <SubscriptionCard key={sub.id} sub={sub} />)}
-
-            <div className="bg-white border border-gray-200 rounded p-4 mt-2">
-              <p className="text-xs font-bold text-gray-700 mb-1">💡 Subscribe more products</p>
-              <p className="text-xs text-gray-400">Visit any product page to subscribe for regular delivery</p>
-              <button onClick={() => navigate('/products')}
-                className="mt-3 w-full py-2 border border-brand-600 text-brand-600 font-bold text-xs rounded hover:bg-brand-50 transition-colors">
-                Browse & Subscribe
-              </button>
-            </div>
-          </>
-        )}
-      </div>
       <Footer />
     </div>
   );

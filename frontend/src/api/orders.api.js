@@ -7,6 +7,9 @@ export const ordersApi = {
   getSlots:          (date)         => client.get('/orders/slots', { params: { date } }),
   deleteFromHistory: (id)           => client.delete(`/orders/${id}/history`),
 
+  // Delivery tracking — public, no auth required
+  getTracking:       (id)           => client.get(`/orders/${id}/tracking`),
+
   // Admin
   getDashboard:      ()             => client.get('/dashboard/metrics'),
   adminGetOrders:    (params)       => client.get('/dashboard/orders', { params }),

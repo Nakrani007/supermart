@@ -8,6 +8,8 @@ import { useCartCount, useCartTotals } from '../../store/cartStore.js';
 import { useAuthStore, useIsAuthenticated } from '../../store/authStore.js';
 import { useLocationStore } from '../../store/locationStore.js';
 import { useSavedCount } from '../../store/savedStore.js';
+import { useStoreSelectionStore } from '../../store/storeSelectionStore.js';
+import { publicApi } from '../../api/admin.api.js';
 import VoiceSearch from '../VoiceSearch.jsx';
 import AuthModal from '../common/AuthModal.jsx';
 import AccountDropdown from './AccountDropdown.jsx';
@@ -33,15 +35,36 @@ export default function Header({ showSearch = true, onSearch }) {
   const savedCount     = useSavedCount();
   const isAuthed       = useIsAuthenticated();
   const user           = useAuthStore((s) => s.user);
-  const { city, area, areas, setLocation } = useLocationStore();
+  const { city } = useLocationStore();
+  const { selectedStore, setSelectedStore } = useStoreSelectionStore();
 
-  const [query, setQuery]           = useState(searchParams.get('search') || '');
-  const [showLocation, setShowLoc]  = useState(false);
-  const [showAuth, setShowAuth]     = useState(false);
-  const [showDropdown, setDropdown] = useState(false);
-  const [partialSpeech, setPartial] = useState('');
+  const [query, setQuery]               = useState(searchParams.get('search') || '');
+  const [showLocation, setShowLoc]      = useState(false);
+  const [showAuth, setShowAuth]         = useState(false);
+  const [showDropdown, setDropdown]     = useState(false);
+  const [partialSpeech, setPartial]     = useState('');
+  const [stores, setStores]             = useState([]);
+  const [pendingStore, setPendingStore] = useState(null); // store awaiting confirmation
   const inputRef   = useRef(null);
   const accountRef = useRef(null);
+
+  // Fetch active stores for the location sheet picker
+  useEffect(() => {
+    publicApi.getStores()
+      .then((r) => setStores(r.stores || []))
+      .catch(() => {});
+  }, []);
+
+  // Handle store selection — warn if cart has items
+  const handleStoreSelect = (store) => {
+    if (store.id === selectedStore?.id) { setShowLoc(false); return; }
+    if (cartCount > 0) {
+      setPendingStore(store); // show warning modal
+    } else {
+      setSelectedStore(store);
+      setShowLoc(false);
+    }
+  };
 
   useEffect(() => { setQuery(searchParams.get('search') || ''); }, [searchParams]);
 
@@ -101,8 +124,12 @@ export default function Header({ showSearch = true, onSearch }) {
                 clipRule="evenodd" />
             </svg>
             <div className="min-w-0 text-left">
-              <div className="text-[11px] font-bold text-gray-800 truncate leading-tight">{area}</div>
-              <div className="text-[9px] text-gray-400 leading-none truncate">{city}</div>
+              <div className="text-[11px] font-bold text-gray-800 truncate leading-tight">
+                {selectedStore ? selectedStore.name : 'Select Store'}
+              </div>
+              <div className="text-[9px] text-gray-400 leading-none truncate">
+                {selectedStore ? selectedStore.address?.split(',')[0] : city}
+              </div>
             </div>
             <svg className="w-3 h-3 text-gray-400 flex-shrink-0 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
@@ -302,38 +329,100 @@ export default function Header({ showSearch = true, onSearch }) {
       {/* ══════════════════════════════════════════════════════════
           Location sheet (bottom-sheet on mobile, centered modal on desktop)
           ══════════════════════════════════════════════════════════ */}
+      {/* ── Store picker sheet ── */}
       {showLocation && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLoc(false)} />
-          <div className="relative w-full max-w-sm bg-white rounded-t-3xl sm:rounded-2xl z-10 p-5 shadow-2xl">
-            {/* Drag handle */}
-            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4 sm:hidden" />
+          <div className="relative w-full max-w-sm bg-white rounded-t-3xl sm:rounded-2xl z-10 shadow-2xl
+                          flex flex-col max-h-[80vh]">
+            {/* Drag handle (mobile) */}
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 flex-shrink-0 sm:hidden" />
 
-            <div className="flex items-center gap-2 mb-4">
-              <svg className="w-5 h-5 text-brand-600" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd"
-                  d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
-                  clipRule="evenodd" />
-              </svg>
-              <h3 className="font-bold text-gray-800 text-base">Delivering to</h3>
+            {/* Sheet header */}
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🏪</span>
+                <h3 className="font-bold text-gray-800 text-base">Select Store</h3>
+              </div>
+              <button onClick={() => setShowLoc(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100
+                           hover:bg-gray-200 text-gray-500 text-sm transition-colors">
+                ✕
+              </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-              {areas.map((a) => (
-                <button key={a} onClick={() => { setLocation('Surat', a); setShowLoc(false); }}
-                  className={`py-2.5 px-3 rounded-xl text-sm font-medium border-2 transition-all text-left
-                    ${area === a
-                      ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
-                      : 'border-gray-100 bg-gray-50 text-gray-700 hover:border-brand-300 hover:bg-brand-50'}`}>
-                  {area === a && <span className="mr-1">✓</span>}
-                  {a}
-                </button>
-              ))}
+            {/* Store list */}
+            <div className="overflow-y-auto flex-1 px-5 pb-5 space-y-2">
+              {stores.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">Loading stores…</p>
+              ) : (
+                stores.map((store) => {
+                  const isActive = store.id === selectedStore?.id;
+                  return (
+                    <button key={store.id} onClick={() => handleStoreSelect(store)}
+                      className={`w-full text-left p-4 rounded-2xl border-2 transition-all flex items-center gap-3
+                        ${isActive
+                          ? 'border-brand-500 bg-brand-50 shadow-sm'
+                          : 'border-gray-100 bg-gray-50 hover:border-brand-300 hover:bg-white'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0
+                                       ${isActive ? 'bg-brand-100' : 'bg-white border border-gray-200'}`}>
+                        🏪
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-gray-900">{store.name}</p>
+                          {store.isMain && (
+                            <span className="text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
+                              Main
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5 truncate">{store.address}, {store.city}</p>
+                        {store.openTime && (
+                          <p className="text-[11px] text-gray-400 mt-0.5">🕐 {store.openTime} – {store.closeTime}</p>
+                        )}
+                      </div>
+                      {isActive && (
+                        <div className="w-6 h-6 bg-brand-600 rounded-full flex items-center justify-center flex-shrink-0">
+                          <span className="text-white text-xs font-bold">✓</span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
+          </div>
+        </div>
+      )}
 
-            <p className="text-[10px] text-gray-400 text-center mt-3">
-              Serving {city}, Gujarat
+      {/* ── Store change warning modal ── */}
+      {pendingStore && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 z-10">
+            <div className="text-3xl text-center mb-3">🏪</div>
+            <h3 className="text-base font-bold text-gray-900 text-center mb-1">Changing Store?</h3>
+            <p className="text-sm text-gray-500 text-center mb-4 leading-relaxed">
+              You are changing your store location to <span className="font-semibold text-gray-800">{pendingStore.name}</span>.
+              Some products in your cart may not be available at the selected store.
             </p>
+            <div className="flex gap-2">
+              <button onClick={() => setPendingStore(null)}
+                className="flex-1 py-2.5 border-2 border-gray-200 rounded-xl text-sm font-bold text-gray-600
+                           hover:border-gray-300 hover:bg-gray-50 active:scale-95 transition-all">
+                Keep Current
+              </button>
+              <button onClick={() => {
+                setSelectedStore(pendingStore);
+                setPendingStore(null);
+                setShowLoc(false);
+              }}
+                className="flex-1 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-bold
+                           hover:bg-brand-700 active:scale-95 transition-all">
+                Change Store
+              </button>
+            </div>
           </div>
         </div>
       )}

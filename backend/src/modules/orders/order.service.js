@@ -5,11 +5,18 @@
 import { prisma } from '../../config/db.js';
 import { cache } from '../../config/redis.js';
 import { generateOrderNumber, generateFallbackOrderNumber } from '../../utils/orderNumber.js';
+import { haversineKm } from '../../utils/haversine.js';
 import { logger } from '../../utils/logger.js';
 
 const FREE_DELIVERY_THRESHOLD = Number(process.env.FREE_DELIVERY_THRESHOLD) || 500;
 const DELIVERY_FEE            = Number(process.env.DELIVERY_FEE)            || 40;
 const MAX_ORDER_RETRIES       = 3;
+
+// Store location — sourced from .env so the owner can update without a redeploy
+const STORE_LAT          = parseFloat(process.env.STORE_LAT          || '21.2094');
+const STORE_LNG          = parseFloat(process.env.STORE_LNG          || '72.8261');
+const DELIVERY_RADIUS_KM = parseFloat(process.env.DELIVERY_RADIUS_KM || '4');
+const STORE_ADDRESS      = process.env.STORE_ADDRESS || 'Kapodra, Surat, Gujarat';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,8 +44,23 @@ function isOrderNumberCollision(err) {
 // ─── Create Order ─────────────────────────────────────────────────────────────
 
 export async function createOrderService(userId, orderData) {
-  const { cartItems, fulfillmentType, deliverySlotId, address, notes } = orderData;
+  const { cartItems, fulfillmentType, deliverySlotId, address, notes, deliveryLocation, storeId } = orderData;
   const productIds = cartItems.map((i) => i.productId);
+
+  // ── Delivery zone check ────────────────────────────────────────────────────
+  // Only enforced when the client sends GPS coordinates (browser may deny permission).
+  // HOME_DELIVERY without coordinates is still accepted — rider confirms on ground.
+  if (fulfillmentType === 'HOME_DELIVERY' && deliveryLocation) {
+    const dist = haversineKm(deliveryLocation.lat, deliveryLocation.lng, STORE_LAT, STORE_LNG);
+    if (dist > DELIVERY_RADIUS_KM) {
+      throw createErr(
+        `Your location is ${dist.toFixed(1)} km from our store (${STORE_ADDRESS}). ` +
+        `We deliver within ${DELIVERY_RADIUS_KM} km only.`,
+        422
+      );
+    }
+    logger.info({ dist: dist.toFixed(2), userId }, '[Order] Delivery zone check passed');
+  }
 
   let order;
   let lastErr;
@@ -119,12 +141,16 @@ export async function createOrderService(userId, orderData) {
             status:          'PENDING',
             fulfillmentType,
             deliverySlotId:  deliverySlotId || null,
+            storeId:         storeId        || null,
             address:         addressStr,
             subtotal,
             discount,
             deliveryFee,
             total,
             notes:           notes || null,
+            // Save customer GPS for map view + delivery tracking
+            customerLat:     deliveryLocation?.lat  ?? null,
+            customerLng:     deliveryLocation?.lng  ?? null,
             items:           { create: lineItems },
           },
           include: {
@@ -222,6 +248,48 @@ export async function deleteOrderFromHistoryService(orderId, userId) {
   const order = await prisma.order.findFirst({ where: { id: orderId, userId } });
   if (!order) throw createErr('Order not found', 404);
   await prisma.order.update({ where: { id: orderId }, data: { hiddenByUser: true } });
+}
+
+// ─── Delivery Tracking ────────────────────────────────────────────────────────
+
+/** Update delivery boy live GPS (called by admin/rider) */
+export async function updateDeliveryTrackingService(orderId, lat, lng) {
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { id: true } });
+  if (!order) throw createErr('Order not found', 404);
+  return prisma.order.update({
+    where: { id: orderId },
+    data:  { deliveryLat: lat, deliveryLng: lng, deliveryLocAt: new Date() },
+  });
+}
+
+/** Get tracking snapshot — public, returns store + delivery boy + customer coords */
+export async function getDeliveryTrackingService(orderId) {
+  const order = await prisma.order.findUnique({
+    where:  { id: orderId },
+    select: {
+      id: true, orderNumber: true, status: true, fulfillmentType: true,
+      deliveryLat: true, deliveryLng: true, deliveryLocAt: true,
+      customerLat: true, customerLng: true,
+    },
+  });
+  if (!order) throw createErr('Order not found', 404);
+
+  const storeLat = parseFloat(process.env.STORE_LAT  || '21.2094');
+  const storeLng = parseFloat(process.env.STORE_LNG  || '72.8261');
+
+  return {
+    orderId:      order.id,
+    orderNumber:  order.orderNumber,
+    status:       order.status,
+    fulfillmentType: order.fulfillmentType,
+    store: { lat: storeLat, lng: storeLng, name: 'SuperMart', address: process.env.STORE_ADDRESS || 'Kapodra, Surat' },
+    deliveryBoy:  order.deliveryLat
+      ? { lat: order.deliveryLat, lng: order.deliveryLng, updatedAt: order.deliveryLocAt }
+      : null,
+    customer: order.customerLat
+      ? { lat: order.customerLat, lng: order.customerLng }
+      : null,
+  };
 }
 
 export async function getAvailableSlotsService(dateStr) {

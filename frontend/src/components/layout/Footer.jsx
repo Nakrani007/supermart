@@ -31,11 +31,11 @@ const COLUMNS = [
   {
     heading: 'Help & Policies',
     links: [
-      { label: 'Contact Us',         href: '#' },
-      { label: 'FAQs',               href: '#' },
-      { label: 'Return Policy',      href: '#' },
-      { label: 'Privacy Policy',     href: '#' },
-      { label: 'Terms & Conditions', href: '#' },
+      { label: 'Contact Us',         href: '/contact'        },
+      { label: 'FAQs',               href: '/faq'            },
+      { label: 'Return Policy',      href: '/return-policy'  },
+      { label: 'Privacy Policy',     href: '/privacy-policy' },
+      { label: 'Terms & Conditions', href: '/terms'          },
     ],
   },
 ];
@@ -71,7 +71,7 @@ export default function Footer() {
   const navigate = useNavigate();
 
   return (
-    <footer className="bg-gray-900 text-white mt-2">
+    <footer className="bg-gray-900 text-white mt-auto">
 
       {/* ── Top section ── */}
       <div className="px-5 py-8 max-w-[1400px] mx-auto">
@@ -186,9 +186,9 @@ export default function Footer() {
             © {new Date().getFullYear()} SuperMart. All rights reserved. Surat, Gujarat, India.
           </p>
           <div className="flex items-center gap-4">
-            <button className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Privacy</button>
-            <button className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Terms</button>
-            <button className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Sitemap</button>
+            <button onClick={() => navigate('/privacy-policy')} className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Privacy</button>
+            <button onClick={() => navigate('/terms')}          className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Terms</button>
+            <button onClick={() => navigate('/contact')}        className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">Contact</button>
           </div>
         </div>
       </div>

@@ -19,8 +19,52 @@ function buildOrderBy(sort) {
   }
 }
 
-export async function getAllProductsService({ categorySlug, search, page = 1, limit = 40, sort, minPrice, maxPrice, exclude }) {
-  const isFiltered = !!(search || categorySlug || sort || minPrice || maxPrice || exclude);
+// ── Denylist store filter ─────────────────────────────────────────────────────
+// Show all globally-active products EXCEPT those explicitly hidden for this store.
+//
+// Products with NO StoreProduct record  → visible (no config = not hidden)
+// Products with StoreProduct.isActive = true  → visible
+// Products with StoreProduct.isActive = false → excluded (denylist hit)
+//
+// This means hiding a product in Store 3 has zero effect on Store 1 or Store 2.
+// It also means a new store with zero configuration shows the full catalog —
+// no inventory setup required before products appear.
+function buildStoreWhere(base, storeId) {
+  if (!storeId) return base;
+  return {
+    ...base,
+    NOT: { storeProducts: { some: { storeId, isActive: false } } },
+  };
+}
+
+// Include store-specific StoreProduct in select so we can surface correct stockQty and pricing
+function buildSelectWithStore(storeId) {
+  if (!storeId) return PRODUCT_SELECT;
+  return {
+    ...PRODUCT_SELECT,
+    storeProducts: { where: { storeId }, select: { stockQty: true, mrp: true, discountPrice: true } },
+  };
+}
+
+// Swap in store-specific stockQty and pricing where a StoreProduct record exists
+function mapStoreStock(products, storeId) {
+  if (!storeId) return products;
+  return products.map(({ storeProducts, ...p }) => {
+    const sp = storeProducts?.[0];
+    return {
+      ...p,
+      stockQty:      sp?.stockQty      ?? p.stockQty,
+      mrp:           sp?.mrp           ?? p.mrp,
+      discountPrice: sp?.discountPrice ?? p.discountPrice,
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getAllProductsService({ categorySlug, search, page = 1, limit = 40, sort, minPrice, maxPrice, exclude, storeId }) {
+  // Only cache unfiltered global requests (no storeId, no filters)
+  const isFiltered = !!(search || categorySlug || sort || minPrice || maxPrice || exclude || storeId);
   if (!isFiltered) {
     const cacheKey = `products:all:p${page}`;
     const cached = await cache.get(cacheKey);
@@ -29,37 +73,40 @@ export async function getAllProductsService({ categorySlug, search, page = 1, li
     await cache.setex(cacheKey, CACHE_TTL.PRODUCTS, JSON.stringify(result));
     return result;
   }
-  return fetchFromDB({ categorySlug, search, page, limit, sort, minPrice, maxPrice, exclude });
+  return fetchFromDB({ categorySlug, search, page, limit, sort, minPrice, maxPrice, exclude, storeId });
 }
 
-async function fetchFromDB({ categorySlug, search, page = 1, limit = 40, sort, minPrice, maxPrice, exclude }) {
+async function fetchFromDB({ categorySlug, search, page = 1, limit = 40, sort, minPrice, maxPrice, exclude, storeId }) {
   const skip = (page - 1) * limit;
 
   const priceFilter = (minPrice !== undefined || maxPrice !== undefined)
     ? { discountPrice: { ...(minPrice !== undefined && { gte: Number(minPrice) }), ...(maxPrice !== undefined && { lte: Number(maxPrice) }) } }
     : {};
 
-  const where = {
+  const baseWhere = {
     isActive: true,
-    ...(exclude && { id: { not: exclude } }),
+    ...(exclude      && { id: { not: exclude } }),
     ...(categorySlug && { category: { slug: categorySlug } }),
     ...(search && {
       OR: [
-        { name: { contains: search } },
-        { nameHi: { contains: search } },
-        { nameGu: { contains: search } },
-        { barcode: { equals: search } },
+        { name:    { contains: search } },
+        { nameHi:  { contains: search } },
+        { nameGu:  { contains: search } },
+        { barcode: { equals:   search } },
       ],
     }),
     ...priceFilter,
   };
 
+  const where        = buildStoreWhere(baseWhere, storeId);
+  const selectFields = buildSelectWithStore(storeId);
+
   const [products, total] = await Promise.all([
-    prisma.product.findMany({ where, skip, take: limit, select: PRODUCT_SELECT, orderBy: buildOrderBy(sort) }),
+    prisma.product.findMany({ where, skip, take: limit, select: selectFields, orderBy: buildOrderBy(sort) }),
     prisma.product.count({ where }),
   ]);
 
-  return { products, total, page, totalPages: Math.ceil(total / limit) };
+  return { products: mapStoreStock(products, storeId), total, page, totalPages: Math.ceil(total / limit) };
 }
 
 export async function getCategoriesService() {
@@ -76,61 +123,158 @@ export async function getCategoriesService() {
   return categories;
 }
 
-export async function getLabeledProductsService(label, limit = 12) {
-  const labelMap = { clearance: { isClearance: true }, weeklySaver: { isWeeklySaver: true }, bestSeller: { isBestSeller: true } };
+export async function getLabeledProductsService(label, limit = 12, storeId) {
+  const labelMap = {
+    clearance:   { isClearance: true },
+    weeklySaver: { isWeeklySaver: true },
+    bestSeller:  { isBestSeller: true },
+  };
   const labelWhere = labelMap[label] || {};
 
-  return prisma.product.findMany({
-    where: { isActive: true, stockQty: { gt: 0 }, ...labelWhere },
-    select: PRODUCT_SELECT,
-    orderBy: [{ stockQty: 'desc' }, { name: 'asc' }],
-    take: limit,
+  const baseWhere    = { isActive: true, stockQty: { gt: 0 }, ...labelWhere };
+  const where        = buildStoreWhere(baseWhere, storeId);
+  const selectFields = buildSelectWithStore(storeId);
+
+  const products = await prisma.product.findMany({
+    where, select: selectFields, orderBy: [{ name: 'asc' }], take: limit,
   });
+
+  return mapStoreStock(products, storeId);
 }
 
-export async function getProductByIdService(id) {
+export async function getProductByIdService(id, storeId) {
   const product = await prisma.product.findUnique({
     where: { id, isActive: true },
-    select: { ...PRODUCT_SELECT, sku: true },
+    select: {
+      ...PRODUCT_SELECT, sku: true,
+      // Include store-specific record so we can check visibility + use store stock
+      ...(storeId && {
+        storeProducts: {
+          where:  { storeId },
+          select: { isActive: true, stockQty: true },
+        },
+      }),
+    },
   });
   if (!product) throw Object.assign(new Error('Product not found'), { statusCode: 404 });
-  return product;
+
+  if (storeId) {
+    const sp = product.storeProducts?.[0];
+    // Only 404 when there is an EXPLICIT hide record (isActive: false) for this store.
+    // No StoreProduct record at all = product is visible (denylist semantics).
+    if (sp && !sp.isActive) {
+      throw Object.assign(new Error('Product not available at this store'), { statusCode: 404 });
+    }
+    const { storeProducts, ...rest } = product;
+    // Use store-specific stockQty if a record exists, otherwise fall back to global
+    return sp ? { ...rest, stockQty: sp.stockQty } : rest;
+  }
+
+  // Global path — strip storeProducts if present
+  const { storeProducts, ...rest } = product;
+  return rest;
 }
 
-export async function getTopDealsService(limit = 10) {
+export async function getTopDealsService(limit = 10, storeId) {
+  const baseWhere    = { isActive: true, stockQty: { gt: 0 } };
+  const where        = buildStoreWhere(baseWhere, storeId);
+  const selectFields = buildSelectWithStore(storeId);
+
   const products = await prisma.product.findMany({
-    where: { isActive: true, stockQty: { gt: 0 } },
-    select: PRODUCT_SELECT,
+    where, select: selectFields,
     orderBy: [{ mrp: 'desc' }, { discountPrice: 'asc' }],
     take: limit * 3,
   });
-  // Sort by actual discount % and trim
-  return products
+
+  return mapStoreStock(products, storeId)
     .map((p) => ({ ...p, discountPct: p.mrp > p.discountPrice ? Math.round((1 - p.discountPrice / p.mrp) * 100) : 0 }))
     .filter((p) => p.discountPct > 0)
     .sort((a, b) => b.discountPct - a.discountPct)
     .slice(0, limit);
 }
 
-export async function getDailyEssentialsService(limit = 10) {
+export async function getDailyEssentialsService(limit = 10, storeId) {
+  const baseWhere = {
+    isActive: true,
+    stockQty: { gt: 0 },
+    category: { slug: { in: ['staples', 'dairy', 'vegetables'] } },
+  };
+  const where        = buildStoreWhere(baseWhere, storeId);
+  const selectFields = buildSelectWithStore(storeId);
+
   const products = await prisma.product.findMany({
-    where: {
-      isActive: true,
-      stockQty: { gt: 0 },
-      category: { slug: { in: ['staples', 'dairy', 'vegetables'] } },
-    },
-    select: PRODUCT_SELECT,
-    orderBy: [{ stockQty: 'desc' }, { name: 'asc' }],
-    take: limit,
+    where, select: selectFields, orderBy: [{ name: 'asc' }], take: limit,
   });
-  return products;
+  return mapStoreStock(products, storeId);
 }
 
-export async function getRelatedProductsService(productId, categorySlug, limit = 8) {
-  return prisma.product.findMany({
-    where: { isActive: true, id: { not: productId }, category: { slug: categorySlug } },
-    select: PRODUCT_SELECT,
-    take: limit,
-    orderBy: [{ stockQty: 'desc' }, { name: 'asc' }],
+export async function getRelatedProductsService(productId, categorySlug, limit = 8, storeId) {
+  const baseWhere = {
+    isActive: true,
+    id: { not: productId },
+    category: { slug: categorySlug },
+  };
+  const where        = buildStoreWhere(baseWhere, storeId);
+  const selectFields = buildSelectWithStore(storeId);
+
+  const products = await prisma.product.findMany({
+    where, select: selectFields, take: limit,
+    orderBy: [{ name: 'asc' }],
   });
+  return mapStoreStock(products, storeId);
+}
+
+// ── Cart validation against a specific store ──────────────────────────────────
+// Returns unavailableItems[] with productId + reason for each unavailable item.
+// Falls back to global Product.stockQty when no StoreProduct record exists.
+
+export async function validateCartService(storeId, items) {
+  if (!storeId || !items?.length) return { unavailableItems: [] };
+
+  const productIds = items.map((i) => i.productId);
+
+  // Fetch store-specific inventory records
+  const storeProducts = await prisma.storeProduct.findMany({
+    where: { storeId, productId: { in: productIds } },
+    select: { productId: true, stockQty: true, isActive: true },
+  });
+  const spMap = new Map(storeProducts.map((sp) => [sp.productId, sp]));
+
+  // Fetch global product records for fallback
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds }, isActive: true },
+    select: { id: true, stockQty: true },
+  });
+  const prodMap = new Map(products.map((p) => [p.id, p]));
+
+  const unavailableItems = [];
+
+  for (const item of items) {
+    const prod = prodMap.get(item.productId);
+    if (!prod) {
+      unavailableItems.push({ productId: item.productId, reason: 'Product not found' });
+      continue;
+    }
+
+    const sp = spMap.get(item.productId);
+    if (sp) {
+      // Per-store record exists — use it
+      if (!sp.isActive || sp.stockQty === 0) {
+        unavailableItems.push({ productId: item.productId, reason: 'Out of stock at this store' });
+      } else if (sp.stockQty < item.quantity) {
+        unavailableItems.push({
+          productId: item.productId,
+          reason: `Only ${sp.stockQty} available`,
+          available: sp.stockQty,
+        });
+      }
+    } else {
+      // No per-store record → fallback to global stock
+      if (prod.stockQty === 0) {
+        unavailableItems.push({ productId: item.productId, reason: 'Out of stock' });
+      }
+    }
+  }
+
+  return { unavailableItems };
 }

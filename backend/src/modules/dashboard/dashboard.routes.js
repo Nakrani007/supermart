@@ -15,3 +15,6 @@ dashboardRouter.get('/orders', ctrl.getAllOrders);
 
 // PATCH /api/v1/dashboard/orders/:id/status
 dashboardRouter.patch('/orders/:id/status', ctrl.updateOrderStatus);
+
+// PUT /api/v1/dashboard/orders/:id/tracking  — update delivery boy live GPS
+dashboardRouter.put('/orders/:id/tracking', ctrl.updateDeliveryTracking);

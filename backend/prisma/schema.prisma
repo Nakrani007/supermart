@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -60,6 +60,8 @@ model Address {
   pincode   String
   landmark  String?
   isDefault Boolean  @default(false)
+  lat       Float?   // GPS latitude  — used for delivery zone check
+  lng       Float?   // GPS longitude — used for delivery zone check
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -108,8 +110,9 @@ model Product {
   isWeeklySaver Boolean  @default(false)
   categoryId    String
 
-  category   Category        @relation(fields: [categoryId], references: [id])
-  orderItems OrderLineItem[]
+  category      Category        @relation(fields: [categoryId], references: [id])
+  orderItems    OrderLineItem[]
+  storeProducts StoreProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -144,29 +147,41 @@ model DeliverySlot {
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
 model Order {
-  id              String   @id @default(cuid())
-  orderNumber     String   @unique
+  id              String    @id @default(cuid())
+  orderNumber     String    @unique
   userId          String
-  status          String   @default("PENDING")
-  fulfillmentType String   @default("HOME_DELIVERY")
+  status          String    @default("PENDING")
+  fulfillmentType String    @default("HOME_DELIVERY")
   deliverySlotId  String?
   address         String?
   subtotal        Float
-  discount        Float    @default(0)
-  deliveryFee     Float    @default(0)
+  discount        Float     @default(0)
+  deliveryFee     Float     @default(0)
   total           Float
   notes           String?
-  hiddenByUser    Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  hiddenByUser    Boolean   @default(false)
+  // Customer GPS saved at order time (from deliveryLocation in checkout)
+  customerLat     Float?
+  customerLng     Float?
+  // Live delivery tracking — updated by delivery boy / admin during OUT_FOR_DELIVERY
+  deliveryLat     Float?
+  deliveryLng     Float?
+  deliveryLocAt   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Which store fulfilled / is expected to fulfill this order
+  storeId     String?
 
   user         User           @relation(fields: [userId], references: [id])
   deliverySlot DeliverySlot?  @relation(fields: [deliverySlotId], references: [id])
+  store        Store?         @relation(fields: [storeId], references: [id])
   items        OrderLineItem[]
 
   @@index([userId])
   @@index([userId, hiddenByUser])
   @@index([status])
+  @@index([storeId])
   @@index([createdAt])
   @@index([userId, createdAt])
 }
@@ -230,6 +245,69 @@ model DeliveryConfig {
   earliestMsg     String   @default("Delivery in 2-4 hours")
   freeDeliveryMin Float    @default(0)
   deliveryFee     Float    @default(0)
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Stores ──────────────────────────────────────────────────────────────────
+// Multiple physical stores. isMain = used as the delivery zone origin.
+
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  city      String   @default("Surat")
+  state     String   @default("Gujarat")
+  pincode   String
+  phone     String?
+  email     String?
+  lat       Float?
+  lng       Float?
+  openTime  String?  // "09:00"
+  closeTime String?  // "21:00"
+  isActive  Boolean  @default(true)
+  isMain    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  storeProducts StoreProduct[]
+  orders        Order[]
+
+  @@index([isActive])
+  @@index([isMain])
+}
+
+// ─── Store Inventory ──────────────────────────────────────────────────────────
+// Per-store product availability. If no record exists for (storeId, productId),
+// falls back to global Product.stockQty for backwards compatibility.
+
+model StoreProduct {
+  id            String  @id @default(cuid())
+  storeId       String
+  productId     String
+  stockQty      Int     @default(0)
+  isActive      Boolean @default(true)
+  mrp           Float?
+  discountPrice Float?
+
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productId])
+  @@index([storeId])
+  @@index([productId])
+}
+
+// ─── Delivery Zone ────────────────────────────────────────────────────────────
+// Singleton row (id = "singleton") — admin edits radius + pincode whitelist.
+// Frontend fetches this to decide checkout eligibility dynamically.
+
+model DeliveryZone {
+  id              String   @id @default("singleton")
+  radiusKm        Float    @default(5)
+  allowedPincodes String   @default("[]")   // JSON string array e.g. '["395001","395002"]'
+  storeLat        Float    @default(21.2094)
+  storeLng        Float    @default(72.8261)
+  storeArea       String   @default("Kapodra, Surat")
   updatedAt       DateTime @updatedAt
 }
 

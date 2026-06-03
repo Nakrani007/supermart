@@ -1,6 +1,7 @@
 // Admin Slots Page — manage delivery time slots and delivery configuration.
 
 import { useState, useEffect, useCallback } from 'react';
+import Tooltip from '../components/common/Tooltip.jsx';
 import AdminLayout from './AdminLayout.jsx';
 import { adminApi } from '../api/admin.api.js';
 
@@ -105,6 +106,203 @@ function SlotModal({ slot, defaultDate, onClose, onSave }) {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ─── Delivery Zone Panel ──────────────────────────────────────────────────────
+
+function DeliveryZonePanel() {
+  const [zone,    setZone]    = useState(null);
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+  const [error,   setError]   = useState('');
+  const [newPin,  setNewPin]  = useState('');
+
+  useEffect(() => {
+    adminApi.getDeliveryZone()
+      .then((r) => setZone(r.zone || r))
+      .catch(() => {});
+  }, []);
+
+  const set = (k, v) => setZone((z) => ({ ...z, [k]: v }));
+
+  const addPincode = () => {
+    const pc = newPin.trim().replace(/\D/g, '');
+    if (!/^\d{4,6}$/.test(pc)) { setError('Enter a valid 4–6 digit pincode'); return; }
+    if (zone.allowedPincodes.includes(pc)) { setError('Pincode already added'); return; }
+    set('allowedPincodes', [...zone.allowedPincodes, pc]);
+    setNewPin('');
+    setError('');
+  };
+
+  const removePin = (pc) => set('allowedPincodes', zone.allowedPincodes.filter((p) => p !== pc));
+
+  const handleSave = async () => {
+    setSaving(true); setError('');
+    try {
+      const r = await adminApi.updateDeliveryZone({
+        radiusKm:        zone.radiusKm,
+        allowedPincodes: zone.allowedPincodes,
+        storeLat:        zone.storeLat,
+        storeLng:        zone.storeLng,
+        storeArea:       zone.storeArea,
+      });
+      setZone(r.zone || r);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) { setError(e.message || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  if (!zone) return <div className="bg-gray-900 border border-gray-800 rounded-2xl h-40 animate-pulse" />;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">🗺️ Delivery Zone</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Set radius and allowed pincodes for delivery eligibility</p>
+        </div>
+        <button onClick={handleSave} disabled={saving}
+          className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+            saved ? 'bg-green-700 text-white' : 'bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-60'
+          }`}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Zone'}
+        </button>
+      </div>
+
+      {/* ── Radius Slider ── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Delivery Radius
+          </label>
+          <span className="text-sm font-bold text-brand-400">{zone.radiusKm} km</span>
+        </div>
+        <input
+          type="range"
+          min={1} max={30} step={0.5}
+          value={zone.radiusKm}
+          onChange={(e) => set('radiusKm', Number(e.target.value))}
+          className="w-full accent-brand-500 cursor-pointer"
+        />
+        <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+          <span>1 km</span>
+          <span>5 km (default)</span>
+          <span>30 km</span>
+        </div>
+        {/* Visual km circles legend */}
+        <div className="flex gap-2 mt-3 flex-wrap">
+          {[2, 5, 10, 15, 20].map((km) => (
+            <button
+              key={km}
+              onClick={() => set('radiusKm', km)}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                zone.radiusKm === km
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              {km} km
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Store Location ── */}
+      <div className="space-y-2">
+        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Store Location
+        </label>
+        <input
+          value={zone.storeArea}
+          onChange={(e) => set('storeArea', e.target.value)}
+          placeholder="e.g. Kapodra, Surat"
+          className="w-full bg-gray-800 border border-gray-700 text-white placeholder-gray-500 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Latitude</label>
+            <input
+              type="number" step="0.0001"
+              value={zone.storeLat}
+              onChange={(e) => set('storeLat', Number(e.target.value))}
+              className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Longitude</label>
+            <input
+              type="number" step="0.0001"
+              value={zone.storeLng}
+              onChange={(e) => set('storeLng', Number(e.target.value))}
+              className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+            />
+          </div>
+        </div>
+        <a
+          href={`https://www.google.com/maps?q=${zone.storeLat},${zone.storeLng}`}
+          target="_blank" rel="noreferrer"
+          className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1"
+        >
+          📍 View store pin on Google Maps ↗
+        </a>
+      </div>
+
+      {/* ── Pincode Whitelist ── */}
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+            Allowed Pincodes
+          </label>
+          <p className="text-[11px] text-gray-600">
+            Customers with these pincodes can order even if outside the radius above.
+          </p>
+        </div>
+
+        {/* Add pincode */}
+        <div className="flex gap-2">
+          <input
+            value={newPin}
+            onChange={(e) => { setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPincode(); } }}
+            placeholder="Enter pincode (e.g. 395010)"
+            maxLength={6}
+            inputMode="numeric"
+            className="flex-1 bg-gray-800 border border-gray-700 text-white placeholder-gray-500 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+          />
+          <button
+            onClick={addPincode}
+            className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-xl transition-colors"
+          >
+            Add
+          </button>
+        </div>
+
+        {/* Pincode chips */}
+        {zone.allowedPincodes.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {zone.allowedPincodes.map((pc) => (
+              <div key={pc}
+                className="flex items-center gap-1.5 bg-gray-800 border border-gray-700 px-2.5 py-1.5 rounded-full">
+                <span className="text-xs font-mono font-semibold text-white">{pc}</span>
+                <button
+                  onClick={() => removePin(pc)}
+                  className="text-gray-500 hover:text-red-400 transition-colors leading-none text-sm"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-600 italic">No pincodes added — only radius applies</p>
+        )}
+      </div>
+
+      {error && <p className="text-red-400 text-xs">{error}</p>}
     </div>
   );
 }
@@ -253,6 +451,9 @@ export default function AdminSlotsPage() {
           <p className="text-gray-400 text-sm">Manage time slots and delivery configuration</p>
         </div>
 
+        {/* Delivery Zone Card */}
+        <DeliveryZonePanel />
+
         {/* Delivery Config Card */}
         <DeliveryConfigPanel />
 
@@ -268,22 +469,28 @@ export default function AdminSlotsPage() {
 
           {/* Date picker row */}
           <div className="flex items-center gap-2">
-            <button onClick={() => shiftDate(-1)}
-              className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors flex-shrink-0">
-              ‹
-            </button>
+            <Tooltip text="Previous day" position="top">
+              <button onClick={() => shiftDate(-1)}
+                className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors flex-shrink-0">
+                ‹
+              </button>
+            </Tooltip>
             <div className="flex-1">
               <input type="date" value={selectedDate} onChange={(e) => handleDateChange(e.target.value)}
                 className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-500 [color-scheme:dark]" />
             </div>
-            <button onClick={() => shiftDate(1)}
-              className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors flex-shrink-0">
-              ›
-            </button>
-            <button onClick={() => setSelectedDate(today())}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-xl transition-colors flex-shrink-0">
-              Today
-            </button>
+            <Tooltip text="Next day" position="top">
+              <button onClick={() => shiftDate(1)}
+                className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors flex-shrink-0">
+                ›
+              </button>
+            </Tooltip>
+            <Tooltip text="Jump to today" position="top">
+              <button onClick={() => setSelectedDate(today())}
+                className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded-xl transition-colors flex-shrink-0">
+                Today
+              </button>
+            </Tooltip>
           </div>
 
           {/* Date label + summary */}
@@ -333,8 +540,10 @@ export default function AdminSlotsPage() {
                       {/* Capacity bar */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-gray-400">{slot.booked} / {slot.capacity} orders</span>
-                          {isFull && <span className="text-[10px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded font-medium">Full</span>}
+                          <Tooltip text={`${fill}% full · ${slot.capacity - slot.booked} slots remaining`} position="top">
+                            <span className="text-xs text-gray-400 cursor-help">{slot.booked} / {slot.capacity} orders</span>
+                          </Tooltip>
+                          {isFull && <Tooltip text="No more orders can be booked for this slot"><span className="text-[10px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded font-medium cursor-help">Full</span></Tooltip>}
                         </div>
                         <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                           <div className={`h-full rounded-full transition-all ${fill > 80 ? 'bg-red-500' : fill > 50 ? 'bg-yellow-500' : 'bg-brand-500'}`}
@@ -343,21 +552,27 @@ export default function AdminSlotsPage() {
                       </div>
 
                       {/* Toggle */}
-                      <button onClick={() => handleToggleActive(slot)}
-                        className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${slot.isActive ? 'bg-brand-600' : 'bg-gray-700'}`}>
-                        <div className={`w-4 h-4 mt-0.5 mx-0.5 bg-white rounded-full shadow transition-transform ${slot.isActive ? 'translate-x-5' : ''}`} />
-                      </button>
+                      <Tooltip text={slot.isActive ? 'Deactivate — hide from customers' : 'Activate — make bookable'} position="top">
+                        <button onClick={() => handleToggleActive(slot)}
+                          className={`w-10 h-5 rounded-full transition-colors flex-shrink-0 ${slot.isActive ? 'bg-brand-600' : 'bg-gray-700'}`}>
+                          <div className={`w-4 h-4 mt-0.5 mx-0.5 bg-white rounded-full shadow transition-transform ${slot.isActive ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </Tooltip>
 
                       {/* Actions */}
                       <div className="flex gap-1 flex-shrink-0">
-                        <button onClick={() => setModal(slot)}
-                          className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition-colors">
-                          Edit
-                        </button>
-                        <button onClick={() => setDelConfirm(slot)}
-                          className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400 text-xs font-semibold rounded-lg transition-colors">
-                          Del
-                        </button>
+                        <Tooltip text="Edit slot time & capacity" position="top">
+                          <button onClick={() => setModal(slot)}
+                            className="px-2.5 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition-colors">
+                            Edit
+                          </button>
+                        </Tooltip>
+                        <Tooltip text="Delete this delivery slot" position="top">
+                          <button onClick={() => setDelConfirm(slot)}
+                            className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-400 text-xs font-semibold rounded-lg transition-colors">
+                            Del
+                          </button>
+                        </Tooltip>
                       </div>
                     </div>
                   </div>

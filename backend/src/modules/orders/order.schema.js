@@ -18,6 +18,13 @@ export const CreateOrderSchema = z.object({
       landmark: z.string().optional(),
     })
     .optional(),
+  // Customer GPS coordinates — used to enforce delivery radius server-side
+  deliveryLocation: z
+    .object({
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+    })
+    .optional(),
   notes: z.string().max(300).optional(),
 }).refine(
   (d) => d.fulfillmentType === 'STORE_PICKUP' || d.address,

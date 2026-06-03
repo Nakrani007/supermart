@@ -143,10 +143,11 @@ function thirtyDaysAgo() {
 
 const VALID_STATUSES = ['PENDING', 'CONFIRMED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
-export async function getAllOrdersService({ page = 1, limit = 20, status = null, search = null }) {
+export async function getAllOrdersService({ page = 1, limit = 20, status = null, search = null, storeId = null }) {
   const skip = (page - 1) * limit;
 
   const where = {
+    ...(storeId && { storeId }),
     ...(status && { status }),
     ...(search && {
       OR: [

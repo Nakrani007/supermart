@@ -32,7 +32,7 @@ export async function ensureDefaultAdmin() {
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 
-export async function getAdminProductsService({ page = 1, limit = 20, search, categorySlug, label, status }) {
+export async function getAdminProductsService({ page = 1, limit = 20, search, categorySlug, label, status, storeId = null }) {
   const skip = (page - 1) * limit;
   const where = {
     ...(status === 'active'   && { isActive: true  }),
@@ -54,12 +54,38 @@ export async function getAdminProductsService({ page = 1, limit = 20, search, ca
     prisma.product.findMany({
       where, skip, take: limit,
       orderBy: [{ createdAt: 'desc' }],
-      include: { category: { select: { id: true, name: true, slug: true } } },
+      include: {
+        category: { select: { id: true, name: true, slug: true } },
+        // When a store is selected, include its StoreProduct record so the
+        // frontend can display/toggle per-store visibility independently.
+        ...(storeId && {
+          storeProducts: {
+            where:  { storeId },
+            select: { id: true, stockQty: true, isActive: true, mrp: true, discountPrice: true },
+          },
+        }),
+      },
     }),
     prisma.product.count({ where }),
   ]);
 
-  return { products, total, page, totalPages: Math.ceil(total / limit) };
+  // Flatten StoreProduct into top-level fields so the client gets a flat object
+  const result = storeId
+    ? products.map(({ storeProducts, ...p }) => {
+        const sp = storeProducts?.[0] ?? null;
+        return {
+          ...p,
+          storeActive:        sp ? sp.isActive      : null,
+          storeStock:         sp ? sp.stockQty      : null,
+          storeProductId:     sp ? sp.id            : null,
+          storeMrp:           sp?.mrp           ?? null,
+          storeDiscountPrice: sp?.discountPrice ?? null,
+          configured:         !!sp,
+        };
+      })
+    : products;
+
+  return { products: result, total, page, totalPages: Math.ceil(total / limit) };
 }
 
 export async function createProductService(data) {
@@ -94,9 +120,27 @@ export async function createProductService(data) {
   return product;
 }
 
-export async function updateProductService(id, data) {
+export async function updateProductService(id, data, storeId = null) {
   const existing = await prisma.product.findUnique({ where: { id } });
   if (!existing) throw Object.assign(new Error('Product not found'), { statusCode: 404 });
+
+  // When a storeId is provided, pricing changes go to StoreProduct (per-store isolation).
+  // Non-pricing fields always update the global Product record.
+  if (storeId && (data.mrp !== undefined || data.discountPrice !== undefined)) {
+    await prisma.storeProduct.upsert({
+      where:  { storeId_productId: { storeId, productId: id } },
+      create: {
+        storeId, productId: id,
+        stockQty: 0, isActive: true,
+        ...(data.mrp          !== undefined && { mrp:          Number(data.mrp)          }),
+        ...(data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
+      },
+      update: {
+        ...(data.mrp          !== undefined && { mrp:          Number(data.mrp)          }),
+        ...(data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
+      },
+    });
+  }
 
   const updated = await prisma.product.update({
     where: { id },
@@ -107,8 +151,9 @@ export async function updateProductService(id, data) {
       ...(data.description  !== undefined && { description:  data.description  }),
       ...(data.sku          !== undefined && { sku:          data.sku          }),
       ...(data.barcode      !== undefined && { barcode:      data.barcode      }),
-      ...(data.mrp          !== undefined && { mrp:          Number(data.mrp)  }),
-      ...(data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
+      // Only update global pricing when no storeId is given (admin editing without store context)
+      ...(!storeId && data.mrp          !== undefined && { mrp:          Number(data.mrp)          }),
+      ...(!storeId && data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
       ...(data.stockQty     !== undefined && { stockQty:     Number(data.stockQty) }),
       ...(data.unit         !== undefined && { unit:         data.unit         }),
       ...(data.imageUrl     !== undefined && { imageUrl:     data.imageUrl     }),
@@ -408,6 +453,159 @@ export async function updateDeliveryConfigService(data) {
   });
 }
 
+// ─── Stores ───────────────────────────────────────────────────────────────────
+
+export async function getStoresService() {
+  return prisma.store.findMany({ orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }] });
+}
+
+export async function getActiveStoresService() {
+  return prisma.store.findMany({ where: { isActive: true }, orderBy: [{ isMain: 'desc' }, { name: 'asc' }] });
+}
+
+export async function createStoreService(data) {
+  const { name, address, city, state, pincode } = data;
+  if (!name?.trim() || !address?.trim() || !pincode?.trim()) {
+    throw Object.assign(new Error('Name, address and pincode are required'), { statusCode: 400 });
+  }
+
+  // If no stores yet, auto-set as main
+  const count = await prisma.store.count();
+  const makeMain = count === 0 || !!data.isMain;
+
+  // Unset current main if we are promoting this one
+  if (makeMain) await prisma.store.updateMany({ where: { isMain: true }, data: { isMain: false } });
+
+  const store = await prisma.store.create({
+    data: {
+      name:      name.trim(),
+      address:   address.trim(),
+      city:      data.city?.trim()  || 'Surat',
+      state:     data.state?.trim() || 'Gujarat',
+      pincode:   pincode.trim(),
+      phone:     data.phone?.trim() || null,
+      email:     data.email?.trim() || null,
+      lat:       data.lat  != null ? Number(data.lat)  : null,
+      lng:       data.lng  != null ? Number(data.lng)  : null,
+      openTime:  data.openTime  || null,
+      closeTime: data.closeTime || null,
+      isActive:  data.isActive  !== false,
+      isMain:    makeMain,
+    },
+  });
+
+  // Sync main store coords → DeliveryZone
+  if (makeMain && store.lat != null && store.lng != null) {
+    await _syncMainStoreToZone(store);
+  }
+
+  return store;
+}
+
+export async function updateStoreService(id, data) {
+  const store = await prisma.store.findUnique({ where: { id } });
+  if (!store) throw Object.assign(new Error('Store not found'), { statusCode: 404 });
+
+  const wasMain = store.isMain;
+  const makeMain = data.isMain === true;
+
+  if (makeMain && !wasMain) {
+    await prisma.store.updateMany({ where: { isMain: true }, data: { isMain: false } });
+  }
+
+  const updated = await prisma.store.update({
+    where: { id },
+    data: {
+      ...(data.name      !== undefined && { name:      data.name.trim()       }),
+      ...(data.address   !== undefined && { address:   data.address.trim()    }),
+      ...(data.city      !== undefined && { city:      data.city.trim()       }),
+      ...(data.state     !== undefined && { state:     data.state.trim()      }),
+      ...(data.pincode   !== undefined && { pincode:   data.pincode.trim()    }),
+      ...(data.phone     !== undefined && { phone:     data.phone?.trim() || null }),
+      ...(data.email     !== undefined && { email:     data.email?.trim() || null }),
+      ...(data.lat       !== undefined && { lat:       data.lat  != null ? Number(data.lat)  : null }),
+      ...(data.lng       !== undefined && { lng:       data.lng  != null ? Number(data.lng)  : null }),
+      ...(data.openTime  !== undefined && { openTime:  data.openTime  || null }),
+      ...(data.closeTime !== undefined && { closeTime: data.closeTime || null }),
+      ...(data.isActive  !== undefined && { isActive:  !!data.isActive }),
+      ...(makeMain && { isMain: true }),
+    },
+  });
+
+  // Sync updated coords if this is (or became) the main store
+  if (updated.isMain && updated.lat != null && updated.lng != null) {
+    await _syncMainStoreToZone(updated);
+  }
+
+  return updated;
+}
+
+export async function deleteStoreService(id) {
+  const store = await prisma.store.findUnique({ where: { id } });
+  if (!store) throw Object.assign(new Error('Store not found'), { statusCode: 404 });
+  if (store.isMain) {
+    const total = await prisma.store.count();
+    if (total > 1) throw Object.assign(
+      new Error('Set another store as main before deleting this one'), { statusCode: 400 }
+    );
+  }
+  await prisma.store.delete({ where: { id } });
+}
+
+export async function setMainStoreService(id) {
+  const store = await prisma.store.findUnique({ where: { id } });
+  if (!store) throw Object.assign(new Error('Store not found'), { statusCode: 404 });
+
+  await prisma.store.updateMany({ where: { isMain: true }, data: { isMain: false } });
+  const updated = await prisma.store.update({ where: { id }, data: { isMain: true } });
+
+  if (updated.lat != null && updated.lng != null) {
+    await _syncMainStoreToZone(updated);
+  }
+
+  return updated;
+}
+
+// Internal helper — keep DeliveryZone in sync with the main store's coordinates
+async function _syncMainStoreToZone(store) {
+  await prisma.deliveryZone.upsert({
+    where:  { id: 'singleton' },
+    create: { id: 'singleton', storeLat: store.lat, storeLng: store.lng, storeArea: `${store.name}, ${store.city}` },
+    update: { storeLat: store.lat, storeLng: store.lng, storeArea: `${store.name}, ${store.city}` },
+  });
+}
+
+// ─── Delivery Zone ────────────────────────────────────────────────────────────
+
+export async function getDeliveryZoneService() {
+  let zone = await prisma.deliveryZone.findUnique({ where: { id: 'singleton' } });
+  if (!zone) {
+    zone = await prisma.deliveryZone.create({ data: { id: 'singleton' } });
+  }
+  return { ...zone, allowedPincodes: JSON.parse(zone.allowedPincodes || '[]') };
+}
+
+export async function updateDeliveryZoneService(data) {
+  const update = {};
+  if (data.radiusKm        != null) update.radiusKm        = Math.max(0.5, Math.min(100, Number(data.radiusKm)));
+  if (data.allowedPincodes != null) update.allowedPincodes = JSON.stringify(
+    (Array.isArray(data.allowedPincodes) ? data.allowedPincodes : [])
+      .map(String)
+      .filter((p) => /^\d{4,6}$/.test(p.trim()))
+      .map((p) => p.trim())
+  );
+  if (data.storeLat  != null) update.storeLat  = Number(data.storeLat);
+  if (data.storeLng  != null) update.storeLng  = Number(data.storeLng);
+  if (data.storeArea != null) update.storeArea = String(data.storeArea).trim();
+
+  const zone = await prisma.deliveryZone.upsert({
+    where:  { id: 'singleton' },
+    create: { id: 'singleton', ...update },
+    update,
+  });
+  return { ...zone, allowedPincodes: JSON.parse(zone.allowedPincodes || '[]') };
+}
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export async function getUsersService({ page = 1, limit = 20, search = null }) {
@@ -420,7 +618,20 @@ export async function getUsersService({ page = 1, limit = 20, search = null }) {
     prisma.user.findMany({
       where, skip, take: limit,
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, mobile: true, email: true, password: true, isVerified: true, isActive: true, createdAt: true, _count: { select: { orders: true } } },
+      select: {
+        id: true, name: true, mobile: true, email: true, password: true,
+        isVerified: true, isActive: true, createdAt: true,
+        _count: { select: { orders: true } },
+        // Include all saved addresses with GPS coordinates
+        addresses: {
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: {
+            id: true, label: true, line1: true, line2: true,
+            city: true, pincode: true, landmark: true, isDefault: true,
+            lat: true, lng: true, createdAt: true,
+          },
+        },
+      },
     }),
     prisma.user.count({ where }),
   ]);
@@ -439,6 +650,7 @@ export async function getUsersService({ page = 1, limit = 20, search = null }) {
     orderCount: u._count.orders, totalSpent: spendMap.get(u.id) || 0,
     authType: u.password ? 'password' : 'otp',
     passwordHint: u.password ? u.password.slice(0, 7) + '••••••••••••••••••••' : null,
+    addresses: u.addresses || [],
   }));
 
   return { users: enriched, total, page, totalPages: Math.ceil(total / limit) };
@@ -469,8 +681,8 @@ export async function getUserOrdersService(userId, { page = 1, limit = 10 }) {
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
-export async function getAdminMetrics() {
-  const cacheKey = 'admin:metrics';
+export async function getAdminMetrics(storeId = null) {
+  const cacheKey = storeId ? `admin:metrics:${storeId}` : 'admin:metrics';
   const cached = await cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
@@ -479,37 +691,59 @@ export async function getAdminMetrics() {
   const monthStart = new Date(now); monthStart.setDate(1);    monthStart.setHours(0, 0, 0, 0);
   const yearStart  = new Date(now); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
 
+  // Store filter applied to all order queries when storeId is provided
+  const storeFilter = storeId ? { storeId } : {};
+
   const [
     todayRev, monthRev, yearRev, allTimeRev,
     todayCount, monthCount, totalCount,
     revenueByDay, revenueByMonth, revenueByYear,
     lineItemGroups, statusGroups, recentOrders, totalUsers,
+    invStats,
   ] = await Promise.all([
-    prisma.order.aggregate({ where: { createdAt: { gte: todayStart }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
-    prisma.order.aggregate({ where: { createdAt: { gte: monthStart }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
-    prisma.order.aggregate({ where: { createdAt: { gte: yearStart  }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
-    prisma.order.aggregate({ where: {                                   status: { notIn: CANCELLED } }, _sum: { total: true } }),
+    prisma.order.aggregate({ where: { ...storeFilter, createdAt: { gte: todayStart }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
+    prisma.order.aggregate({ where: { ...storeFilter, createdAt: { gte: monthStart }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
+    prisma.order.aggregate({ where: { ...storeFilter, createdAt: { gte: yearStart  }, status: { notIn: CANCELLED } }, _sum: { total: true } }),
+    prisma.order.aggregate({ where: { ...storeFilter,                                  status: { notIn: CANCELLED } }, _sum: { total: true } }),
 
-    prisma.order.count({ where: { createdAt: { gte: todayStart } } }),
-    prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
-    prisma.order.count(),
+    prisma.order.count({ where: { ...storeFilter, createdAt: { gte: todayStart } } }),
+    prisma.order.count({ where: { ...storeFilter, createdAt: { gte: monthStart } } }),
+    prisma.order.count({ where: { ...storeFilter } }),
 
-    getDailyRevenue(30),
-    getMonthlyRevenue(12),
-    getYearlyRevenue(),
+    getDailyRevenue(30, storeFilter),
+    getMonthlyRevenue(12, storeFilter),
+    getYearlyRevenue(storeFilter),
 
     prisma.orderLineItem.groupBy({
       by: ['productId'],
-      where: { order: { createdAt: { gte: thirtyDaysAgo() }, status: { notIn: CANCELLED } } },
+      where: { order: { ...storeFilter, createdAt: { gte: thirtyDaysAgo() }, status: { notIn: CANCELLED } } },
       _sum: { lineTotal: true, quantity: true }, _count: { id: true },
       orderBy: { _sum: { lineTotal: 'desc' } }, take: 10,
     }),
-    prisma.order.groupBy({ by: ['status'], _count: { id: true } }),
+    prisma.order.groupBy({ by: ['status'], where: { ...storeFilter }, _count: { id: true } }),
     prisma.order.findMany({
+      where: { ...storeFilter },
       take: 10, orderBy: { createdAt: 'desc' },
       select: { id: true, orderNumber: true, status: true, total: true, createdAt: true, user: { select: { name: true, mobile: true } }, items: { select: { id: true } } },
     }),
     prisma.user.count(),
+    // Inventory stats — store-specific if storeId provided, else global
+    storeId
+      ? prisma.storeProduct.aggregate({
+          where: { storeId },
+          _count: { id: true },
+          _sum: { stockQty: true },
+        }).then(async (agg) => {
+          const outOfStock = await prisma.storeProduct.count({ where: { storeId, stockQty: 0 } });
+          const lowStock   = await prisma.storeProduct.count({ where: { storeId, stockQty: { gt: 0, lte: 5 } } });
+          return { total: agg._count.id, totalStock: agg._sum.stockQty || 0, outOfStock, lowStock };
+        })
+      : prisma.product.aggregate({ where: { isActive: true }, _count: { id: true }, _sum: { stockQty: true } })
+          .then(async (agg) => {
+            const outOfStock = await prisma.product.count({ where: { isActive: true, stockQty: 0 } });
+            const lowStock   = await prisma.product.count({ where: { isActive: true, stockQty: { gt: 0, lte: 5 } } });
+            return { total: agg._count.id, totalStock: agg._sum.stockQty || 0, outOfStock, lowStock };
+          }),
   ]);
 
   const productIds = lineItemGroups.map((r) => r.productId);
@@ -523,6 +757,7 @@ export async function getAdminMetrics() {
       year: Number(yearRev._sum.total) || 0,   allTime: Number(allTimeRev._sum.total) || 0,
     },
     orders: { today: todayCount, month: monthCount, total: totalCount },
+    inventory: invStats,
     totalUsers, revenueByDay, revenueByMonth, revenueByYear, topProducts,
     ordersByStatus: Object.fromEntries(statusGroups.map((r) => [r.status, r._count.id])),
     recentOrders: recentOrders.map((o) => ({ id: o.id, orderNumber: o.orderNumber, status: o.status, total: o.total, itemCount: o.items.length, createdAt: o.createdAt, customer: o.user })),
@@ -532,11 +767,98 @@ export async function getAdminMetrics() {
   return metrics;
 }
 
+// ─── Store Inventory Management ───────────────────────────────────────────────
+
+export async function getStoreInventoryService(storeId, { page = 1, limit = 30, search, categorySlug } = {}) {
+  if (!storeId) throw Object.assign(new Error('storeId is required'), { statusCode: 400 });
+
+  const skip = (page - 1) * limit;
+  const where = {
+    isActive: true,
+    ...(categorySlug && { category: { slug: categorySlug } }),
+    ...(search && {
+      OR: [
+        { name: { contains: search } },
+        { sku:  { contains: search } },
+      ],
+    }),
+  };
+
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({
+      where, skip, take: limit,
+      orderBy: [{ name: 'asc' }],
+      select: {
+        id: true, name: true, sku: true, mrp: true, discountPrice: true,
+        stockQty: true, unit: true, imageUrl: true,
+        category: { select: { name: true, slug: true } },
+        storeProducts: {
+          where: { storeId },
+          select: { id: true, stockQty: true, isActive: true, mrp: true, discountPrice: true },
+        },
+      },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  // Flatten: attach store-specific record (or null) to each product
+  const result = products.map((p) => {
+    const sp = p.storeProducts[0] || null;
+    return {
+      id: p.id, name: p.name, sku: p.sku,
+      mrp: sp?.mrp ?? p.mrp,
+      discountPrice: sp?.discountPrice ?? p.discountPrice,
+      globalMrp: p.mrp,
+      globalDiscountPrice: p.discountPrice,
+      unit: p.unit, imageUrl: p.imageUrl,
+      globalStock: p.stockQty,
+      category: p.category,
+      storeStock: sp?.stockQty ?? null,
+      storeActive: sp?.isActive ?? null,
+      storeProductId: sp?.id ?? null,
+      storeMrp: sp?.mrp ?? null,
+      storeDiscountPrice: sp?.discountPrice ?? null,
+      configured: !!sp,
+    };
+  });
+
+  return { products: result, total, page, totalPages: Math.ceil(total / limit) };
+}
+
+export async function upsertStoreProductService(storeId, productId, data) {
+  if (!storeId || !productId) throw Object.assign(new Error('storeId and productId are required'), { statusCode: 400 });
+
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw Object.assign(new Error('Product not found'), { statusCode: 404 });
+
+  const sp = await prisma.storeProduct.upsert({
+    where:  { storeId_productId: { storeId, productId } },
+    create: {
+      storeId, productId,
+      stockQty: Number(data.stockQty) || 0,
+      isActive: data.isActive !== false,
+      ...(data.mrp          !== undefined && { mrp:          Number(data.mrp)          }),
+      ...(data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
+    },
+    update: {
+      ...(data.stockQty     !== undefined && { stockQty:     Number(data.stockQty)     }),
+      ...(data.isActive     !== undefined && { isActive:     !!data.isActive            }),
+      ...(data.mrp          !== undefined && { mrp:          Number(data.mrp)          }),
+      ...(data.discountPrice !== undefined && { discountPrice: Number(data.discountPrice) }),
+    },
+  });
+
+  // Invalidate the per-store inventory cache so product listings reflect the change immediately
+  await cache.del(`store:${storeId}:hasInventory`);
+
+  return sp;
+}
+
 // ─── Revenue helpers ──────────────────────────────────────────────────────────
 
-async function getDailyRevenue(days) {
+async function getDailyRevenue(days, storeFilter = {}) {
   const since = new Date(); since.setDate(since.getDate() - days + 1); since.setHours(0, 0, 0, 0);
-  const orders = await prisma.order.findMany({ where: { createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
+  const orders = await prisma.order.findMany({ where: { ...storeFilter, createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
   const buckets = {};
   for (let i = 0; i < days; i++) {
     const d = new Date(); d.setDate(d.getDate() - (days - 1 - i));
@@ -547,9 +869,9 @@ async function getDailyRevenue(days) {
   return Object.values(buckets);
 }
 
-async function getMonthlyRevenue(months) {
+async function getMonthlyRevenue(months, storeFilter = {}) {
   const since = new Date(); since.setMonth(since.getMonth() - months + 1); since.setDate(1); since.setHours(0, 0, 0, 0);
-  const orders = await prisma.order.findMany({ where: { createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
+  const orders = await prisma.order.findMany({ where: { ...storeFilter, createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
   const buckets = {};
   for (let i = 0; i < months; i++) {
     const d = new Date(); d.setMonth(d.getMonth() - (months - 1 - i));
@@ -560,10 +882,10 @@ async function getMonthlyRevenue(months) {
   return Object.values(buckets);
 }
 
-async function getYearlyRevenue() {
+async function getYearlyRevenue(storeFilter = {}) {
   const cur = new Date().getFullYear();
   const since = new Date(cur - 4, 0, 1);
-  const orders = await prisma.order.findMany({ where: { createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
+  const orders = await prisma.order.findMany({ where: { ...storeFilter, createdAt: { gte: since }, status: { notIn: CANCELLED } }, select: { createdAt: true, total: true } });
   const buckets = {};
   for (let y = cur - 4; y <= cur; y++) buckets[y] = { year: y, label: String(y), revenue: 0, orders: 0 };
   for (const o of orders) { const y = new Date(o.createdAt).getFullYear(); if (buckets[y]) { buckets[y].revenue += Number(o.total); buckets[y].orders += 1; } }
